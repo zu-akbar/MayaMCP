@@ -100,35 +100,29 @@ class McpListenerWidget(QWidget):
 
         layout.addStretch()
 
+    def _get_mod(self):
+        import sys
+        return sys.modules.get("maya_mcp_listener", self._listener)
+
     def _get_port(self):
-        try:
-            import maya_mcp_listener
-            return maya_mcp_listener._active_port
-        except (ImportError, AttributeError):
-            return self._listener._active_port if self._listener else None
+        mod = self._get_mod()
+        return getattr(mod, "_active_port", None) if mod else None
 
     def _toggle_listener(self):
+        mod = self._get_mod()
+        if not mod:
+            return
         if self._get_port() is not None:
-            self._listener.stop()
-            # Update module global
-            try:
-                import maya_mcp_listener
-                maya_mcp_listener._active_port = None
-            except ImportError:
-                pass
+            mod.stop()
         else:
-            self._listener.start_listener()
-            # Sync module global
-            try:
-                import maya_mcp_listener
-                maya_mcp_listener._active_port = self._listener._active_port
-            except ImportError:
-                pass
+            mod.start_listener()
         self._refresh()
 
     def _refresh(self):
         port = self._get_port()
-        is_active = port is not None and self._listener._check_port_alive(port)
+        mod = self._get_mod()
+        check_alive = getattr(mod, "_check_port_alive", None) if mod else None
+        is_active = port is not None and check_alive and check_alive(port)
 
         if is_active:
             self._status_dot.setStyleSheet("color: #4CAF50; font-size: 16px;")

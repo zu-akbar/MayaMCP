@@ -251,17 +251,5 @@ def _show_ui():
 
 # ── Entry point ──
 
-import sys as _sys
-import types as _types
-
-# Register as a proper module so the UI can reference listener state
-_mod = _types.ModuleType("maya_mcp_listener")
-for _n in ["start_listener", "stop", "_active_port", "_check_port_alive",
-           "_SCRIPT_DIR", "ICON_PATH", "SESSION_DIR", "CLIENT_DIR",
-           "PORT_BASE", "PORT_MAX", "SHELF_BUTTON_NAME"]:
-    if _n in globals():
-        setattr(_mod, _n, globals()[_n])
-_sys.modules["maya_mcp_listener"] = _mod
-
 _create_shelf_button()
 maya.utils.executeDeferred(_show_ui)
