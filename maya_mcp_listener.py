@@ -251,5 +251,28 @@ def _show_ui():
 
 # ── Entry point ──
 
+
+def _on_shelf_click():
+    from PySide2.QtWidgets import QMessageBox
+
+    panel_name = "mcpListenerPanel"
+    if cmds.workspaceControl(panel_name, exists=True) and cmds.workspaceControl(panel_name, query=True, visible=True):
+        reply = QMessageBox.question(
+            None,
+            "MCP Listener",
+            "MCP Listener is already open. Would you like to restart it?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            cmds.workspaceControl(panel_name, edit=True, close=True)
+            if _active_port is not None:
+                stop()
+            _show_ui()
+        return
+
+    _show_ui()
+
+
 _create_shelf_button()
-maya.utils.executeDeferred(_show_ui)
+maya.utils.executeDeferred(_on_shelf_click)
