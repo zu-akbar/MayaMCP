@@ -1,0 +1,226 @@
+"""
+Maya MCP Listener — run inside Maya to enable AI harness connections.
+
+Opens a Python commandPort on an auto-assigned port and registers
+the session so MCP clients can discover and connect to it.
+Also creates a shelf button for easy toggling.
+
+Usage in Maya Script Editor (Python):
+    exec(open("C:/Users/dkZuaAkb/Dev/Git/MayaMCP/maya_mcp_listener.py").read())
+"""
+import json
+import os
+import socket
+import tempfile
+import threading
+import time
+
+import maya.cmds as cmds
+import maya.mel
+import maya.utils
+
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__)) if "__file__" in dir() else ""
+PORT_BASE = 50007
+PORT_MAX = 50099
+SESSION_DIR = os.path.join(tempfile.gettempdir(), "maya_mcp_sessions")
+ICON_PATH = os.path.join(_SCRIPT_DIR, "maya-mcp-icon.jpg") if _SCRIPT_DIR else ""
+SHELF_BUTTON_NAME = "mcpListener"
+_active_port = None
+
+
+def _is_port_free(port):
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.5)
+        s.bind(("127.0.0.1", port))
+        s.close()
+        return True
+    except OSError:
+        return False
+
+
+def _find_free_port():
+    for port in range(PORT_BASE, PORT_MAX + 1):
+        session_file = os.path.join(SESSION_DIR, "{}.json".format(port))
+        if os.path.exists(session_file):
+            continue
+        if _is_port_free(port):
+            return port
+    return None
+
+
+def _write_session_file(port):
+    os.makedirs(SESSION_DIR, exist_ok=True)
+    data = {
+        "port": port,
+        "pid": os.getpid(),
+        "scene": cmds.file(q=True, sceneName=True) or "",
+        "maya_version": cmds.about(version=True),
+        "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    path = os.path.join(SESSION_DIR, "{}.json".format(port))
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+    return path
+
+
+def _update_session_file(port):
+    path = os.path.join(SESSION_DIR, "{}.json".format(port))
+    if not os.path.exists(path):
+        _write_session_file(port)
+        return
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        data["scene"] = cmds.file(q=True, sceneName=True) or ""
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
+
+
+def _delete_session_file(port):
+    path = os.path.join(SESSION_DIR, "{}.json".format(port))
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _open_port(port):
+    port_name = ":{}".format(port)
+    try:
+        cmds.commandPort(port_name, close=True)
+    except RuntimeError:
+        pass
+    cmds.commandPort(
+        name=port_name,
+        sourceType="python",
+        echoOutput=True,
+        bufferSize=4096,
+    )
+
+
+def _check_port_alive(port):
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(1)
+        s.connect(("127.0.0.1", port))
+        s.close()
+        return True
+    except OSError:
+        return False
+
+
+_watchdog_active = True
+
+
+def _watchdog(port):
+    if not _watchdog_active:
+        return
+
+    def _check():
+        if not _check_port_alive(port):
+            print("[MCP] Port {} died, reopening...".format(port))
+            _open_port(port)
+        _update_session_file(port)
+
+    maya.utils.executeDeferred(_check)
+    threading.Timer(5.0, _watchdog, args=[port]).start()
+
+
+def _cleanup(port):
+    global _watchdog_active
+    _watchdog_active = False
+    _delete_session_file(port)
+    try:
+        cmds.commandPort(":{}".format(port), close=True)
+    except RuntimeError:
+        pass
+
+
+def _create_shelf_button():
+    shelf_top = maya.mel.eval("$tmpVar=$gShelfTopLevel")
+    current_shelf = cmds.tabLayout(shelf_top, query=True, selectTab=True)
+
+    existing = cmds.shelfLayout(current_shelf, query=True, childArray=True) or []
+    for child in existing:
+        if cmds.shelfButton(child, query=True, exists=True):
+            try:
+                if cmds.shelfButton(child, query=True, label=True) == SHELF_BUTTON_NAME:
+                    cmds.deleteUI(child)
+            except RuntimeError:
+                pass
+
+    script_path = os.path.abspath(__file__) if "__file__" in dir() else ""
+    click_cmd = 'exec(open("{}").read())'.format(script_path.replace("\\", "/"))
+
+    kwargs = {
+        "parent": current_shelf,
+        "label": SHELF_BUTTON_NAME,
+        "annotation": "MCP Listener — connect AI harness to Maya",
+        "command": click_cmd,
+        "sourceType": "python",
+    }
+    if ICON_PATH and os.path.isfile(ICON_PATH):
+        kwargs["image"] = ICON_PATH
+        kwargs["imageOverlayLabel"] = ""
+    else:
+        kwargs["image"] = "pythonFamily.png"
+        kwargs["imageOverlayLabel"] = "MCP"
+
+    cmds.shelfButton(**kwargs)
+    print("[MCP] Shelf button added to '{}'".format(current_shelf))
+
+
+def stop():
+    global _active_port
+    if _active_port is not None:
+        _cleanup(_active_port)
+        print("[MCP] Stopped listener on port {}".format(_active_port))
+        _active_port = None
+    else:
+        print("[MCP] No active listener to stop")
+
+
+def _show_ui(port):
+    ui_path = os.path.join(_SCRIPT_DIR, "maya_mcp_ui.py") if _SCRIPT_DIR else ""
+    if not ui_path or not os.path.isfile(ui_path):
+        print("[MCP] UI module not found at {}".format(ui_path))
+        return
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("maya_mcp_ui", ui_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.show(port)
+
+
+def start():
+    global _watchdog_active, _active_port
+    _watchdog_active = True
+
+    if _active_port is not None and _check_port_alive(_active_port):
+        print("[MCP] Already listening on port {}".format(_active_port))
+        _show_ui(_active_port)
+        return
+
+    port = _find_free_port()
+    if port is None:
+        cmds.warning("[MCP] No free port found in range {}-{}".format(PORT_BASE, PORT_MAX))
+        return
+
+    _open_port(port)
+    _write_session_file(port)
+    _active_port = port
+    cmds.scriptJob(event=["quitApplication", lambda: _cleanup(port)])
+    _watchdog(port)
+
+    print("[MCP] Listening on port {} (sourceType=python)".format(port))
+    print("[MCP] Session registered at {}".format(
+        os.path.join(SESSION_DIR, "{}.json".format(port))
+    ))
+    _show_ui(port)
+
+
+start()
+_create_shelf_button()
