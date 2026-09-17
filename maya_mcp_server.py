@@ -57,28 +57,94 @@ def _discover_sessions():
     return sessions
 
 
-def _send_python(port, code, timeout=10.0):
+def _send_mel(port, mel_cmd, timeout=10.0):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(timeout)
     try:
         s.connect(("127.0.0.1", port))
-        s.sendall(code.encode("utf-8"))
-        s.shutdown(socket.SHUT_WR)
+        s.sendall((mel_cmd + "\n").encode("utf-8"))
+        time.sleep(0.5)
         result = b""
-        while True:
-            chunk = s.recv(8192)
-            if not chunk:
-                break
-            result += chunk
+        try:
+            while True:
+                chunk = s.recv(8192)
+                if not chunk:
+                    break
+                result += chunk
+                if len(chunk) < 8192:
+                    break
+        except socket.timeout:
+            pass
         return result.decode("utf-8").strip().replace(chr(0), "")
     except socket.timeout:
         return "[ERROR] Timeout waiting for Maya response"
     except ConnectionRefusedError:
         return "[ERROR] Connection refused — Maya session may be closed"
+    except (ConnectionAbortedError, ConnectionResetError):
+        return "[ERROR] Connection aborted — command may have errored in Maya"
     except Exception as e:
         return "[ERROR] {}".format(e)
     finally:
         s.close()
+
+
+def _send_python(port, code, timeout=15.0):
+    """Write Python to a temp file, tell Maya to exec it via MEL, read result from output file."""
+    cmd_dir = os.path.join(tempfile.gettempdir(), "maya_mcp_cmds")
+    os.makedirs(cmd_dir, exist_ok=True)
+
+    cmd_id = "{}_{}".format(port, uuid.uuid4().hex[:8])
+    cmd_file = os.path.join(cmd_dir, "{}.py".format(cmd_id)).replace("\\", "/")
+    out_file = os.path.join(cmd_dir, "{}.out".format(cmd_id)).replace("\\", "/")
+
+    wrapper = (
+        "import sys, io, traceback, json\n"
+        "_mcp_out = io.StringIO()\n"
+        "_mcp_old_stdout = sys.stdout\n"
+        "sys.stdout = _mcp_out\n"
+        "_mcp_err = None\n"
+        "try:\n"
+        "    exec(open('{cmd_file}').read())\n"
+        "except Exception:\n"
+        "    _mcp_err = traceback.format_exc()\n"
+        "finally:\n"
+        "    sys.stdout = _mcp_old_stdout\n"
+        "_mcp_result = _mcp_err if _mcp_err else _mcp_out.getvalue()\n"
+        "with open('{out_file}', 'w') as _f:\n"
+        "    _f.write(_mcp_result)\n"
+    ).format(cmd_file=cmd_file, out_file=out_file)
+
+    with open(cmd_file, "w") as f:
+        f.write(code)
+
+    wrapper_file = os.path.join(cmd_dir, "{}_wrap.py".format(cmd_id)).replace("\\", "/")
+    with open(wrapper_file, "w") as f:
+        f.write(wrapper)
+
+    mel_cmd = "python(\"exec(open('{}').read())\")".format(wrapper_file)
+    _send_mel(port, mel_cmd, timeout=timeout)
+
+    # Wait for output file
+    for _ in range(int(timeout * 4)):
+        if os.path.exists(out_file):
+            time.sleep(0.1)
+            with open(out_file) as f:
+                result = f.read()
+            try:
+                os.remove(cmd_file)
+                os.remove(wrapper_file)
+                os.remove(out_file)
+            except OSError:
+                pass
+            return result.strip() if result.strip() else "(no output)"
+        time.sleep(0.25)
+
+    try:
+        os.remove(cmd_file)
+        os.remove(wrapper_file)
+    except OSError:
+        pass
+    return "[ERROR] Timeout — Maya did not produce output"
 
 
 def _resolve_port(session_id):

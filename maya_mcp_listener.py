@@ -1,7 +1,7 @@
 """
 Maya MCP Listener — run inside Maya to enable AI harness connections.
 
-Opens a Python commandPort on an auto-assigned port and registers
+Opens a MEL commandPort on an auto-assigned port and registers
 the session so MCP clients can discover and connect to it.
 Also creates a shelf button for easy toggling.
 
@@ -19,11 +19,11 @@ import maya.cmds as cmds
 import maya.mel
 import maya.utils
 
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__)) if "__file__" in dir() else ""
+_SCRIPT_DIR = "C:/Users/dkZuaAkb/Dev/Git/MayaMCP"
 PORT_BASE = 50007
 PORT_MAX = 50099
 SESSION_DIR = os.path.join(tempfile.gettempdir(), "maya_mcp_sessions")
-ICON_PATH = os.path.join(_SCRIPT_DIR, "maya-mcp-icon.jpg") if _SCRIPT_DIR else ""
+ICON_PATH = os.path.join(_SCRIPT_DIR, "maya-mcp-icon.jpg")
 SHELF_BUTTON_NAME = "mcpListener"
 _active_port = None
 
@@ -95,21 +95,22 @@ def _open_port(port):
         pass
     cmds.commandPort(
         name=port_name,
-        sourceType="python",
+        sourceType="mel",
         echoOutput=True,
         bufferSize=4096,
     )
 
 
 def _check_port_alive(port):
+    """Check if port is in use by trying to bind — avoids triggering commandPort handler."""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(1)
-        s.connect(("127.0.0.1", port))
+        s.settimeout(0.5)
+        s.bind(("127.0.0.1", port))
         s.close()
-        return True
+        return False  # bind succeeded = port is free = commandPort died
     except OSError:
-        return False
+        return True  # bind failed = port in use = commandPort alive
 
 
 _watchdog_active = True
@@ -152,17 +153,17 @@ def _create_shelf_button():
             except RuntimeError:
                 pass
 
-    script_path = os.path.abspath(__file__) if "__file__" in dir() else ""
-    click_cmd = 'exec(open("{}").read())'.format(script_path.replace("\\", "/"))
+    listener_path = os.path.join(_SCRIPT_DIR, "maya_mcp_listener.py").replace("\\", "/")
+    click_cmd = 'exec(open("{}").read())'.format(listener_path)
 
     kwargs = {
         "parent": current_shelf,
         "label": SHELF_BUTTON_NAME,
-        "annotation": "MCP Listener — connect AI harness to Maya",
+        "annotation": "MCP Listener - connect AI harness to Maya",
         "command": click_cmd,
         "sourceType": "python",
     }
-    if ICON_PATH and os.path.isfile(ICON_PATH):
+    if os.path.isfile(ICON_PATH):
         kwargs["image"] = ICON_PATH
         kwargs["imageOverlayLabel"] = ""
     else:
@@ -184,8 +185,8 @@ def stop():
 
 
 def _show_ui(port):
-    ui_path = os.path.join(_SCRIPT_DIR, "maya_mcp_ui.py") if _SCRIPT_DIR else ""
-    if not ui_path or not os.path.isfile(ui_path):
+    ui_path = os.path.join(_SCRIPT_DIR, "maya_mcp_ui.py")
+    if not os.path.isfile(ui_path):
         print("[MCP] UI module not found at {}".format(ui_path))
         return
     import importlib.util
@@ -215,7 +216,7 @@ def start():
     cmds.scriptJob(event=["quitApplication", lambda: _cleanup(port)])
     _watchdog(port)
 
-    print("[MCP] Listening on port {} (sourceType=python)".format(port))
+    print("[MCP] Listening on port {} (sourceType=mel)".format(port))
     print("[MCP] Session registered at {}".format(
         os.path.join(SESSION_DIR, "{}.json".format(port))
     ))
