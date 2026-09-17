@@ -15,10 +15,12 @@ SHELF_BUTTON_NAME = "mcpListener"
 
 
 def install():
+    target_shelf = "Custom"
     shelf_top = maya.mel.eval("$tmpVar=$gShelfTopLevel")
-    current_shelf = cmds.tabLayout(shelf_top, query=True, selectTab=True)
+    if not cmds.shelfLayout(target_shelf, exists=True):
+        target_shelf = cmds.tabLayout(shelf_top, query=True, selectTab=True)
 
-    existing = cmds.shelfLayout(current_shelf, query=True, childArray=True) or []
+    existing = cmds.shelfLayout(target_shelf, query=True, childArray=True) or []
     for child in existing:
         if cmds.shelfButton(child, query=True, exists=True):
             try:
@@ -30,7 +32,7 @@ def install():
     click_cmd = 'exec(open("{}").read())'.format(LISTENER_PATH)
 
     kwargs = {
-        "parent": current_shelf,
+        "parent": target_shelf,
         "label": SHELF_BUTTON_NAME,
         "annotation": "MCP Listener - connect AI harness to Maya",
         "command": click_cmd,
@@ -44,7 +46,7 @@ def install():
         kwargs["imageOverlayLabel"] = "MCP"
 
     cmds.shelfButton(**kwargs)
-    print("[MCP] Shelf button installed on '{}'. Click it to open the MCP Listener panel.".format(current_shelf))
+    print("[MCP] Shelf button installed on '{}'. Click it to open the MCP Listener panel.".format(target_shelf))
 
 
 install()
