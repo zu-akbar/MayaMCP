@@ -22,33 +22,23 @@ Multiple Maya sessions supported simultaneously. Each gets a unique port and ses
 
 ## Setup
 
-### 1. Install dependencies (Python 3.10+)
+No external dependencies — the MCP protocol is implemented directly. Requires Python 3.9+.
 
-```bash
-python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# Mac/Linux
-source .venv/bin/activate
-
-pip install -r requirements.txt
-```
-
-### 2. Register the MCP server with your AI harness
+### 1. Register the MCP server with your AI harness
 
 **Claude Code** — add `.mcp.json` to your project root:
 ```json
 {
   "mcpServers": {
     "maya": {
-      "command": "C:/path/to/MayaMCP/.venv/Scripts/python.exe",
+      "command": "python",
       "args": ["C:/path/to/MayaMCP/maya_mcp_server.py"]
     }
   }
 }
 ```
 
-**Other MCP clients** — point to `.venv/Scripts/python.exe` + `maya_mcp_server.py` via stdio transport.
+**Other MCP clients** — point to `python` + `maya_mcp_server.py` via stdio transport.
 
 ### 3. Start the listener in Maya
 
@@ -117,6 +107,5 @@ When only one Maya session is connected, `session_id` is optional on eval calls.
 
 ## Requirements
 
-- Python 3.10+ for the MCP server
-- Maya 2023+ (Python 3.9 inside Maya — code sent to Maya must be 3.9 compatible)
-- `mcp` Python package
+- Python 3.9+ (no external packages needed)
+- Maya 2023+ (code sent to Maya must be compatible with Maya's Python version)

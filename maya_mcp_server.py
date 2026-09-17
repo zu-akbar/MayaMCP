@@ -5,31 +5,30 @@ Discovers Maya sessions via session files written by maya_mcp_listener.py,
 sends raw Python code over TCP, and returns results.
 
 Works with Claude Code, OpenCode, Cursor, or any MCP client via stdio.
+No external dependencies — implements MCP JSON-RPC protocol directly.
 """
-import asyncio
 import json
 import os
 import platform
 import socket
+import sys
 import tempfile
 import time
 import uuid
 
-import mcp.server.stdio
-from mcp.server.lowlevel import Server
-from mcp.server.models import InitializationOptions
-from mcp.types import Tool, TextContent
-
 SERVER_NAME = "maya-mcp"
+SERVER_VERSION = "0.1.0"
 SESSION_DIR = os.path.join(tempfile.gettempdir(), "maya_mcp_sessions")
 CLIENT_DIR = os.path.join(tempfile.gettempdir(), "maya_mcp_clients")
 CLIENT_ID = str(uuid.uuid4())[:8]
 CLIENT_NAME = "{}-{}".format(platform.node(), CLIENT_ID)
 
-_connected_sessions: list[int] = []
+_connected_sessions = []
+
+# ── Maya session discovery and communication ──
 
 
-def _pid_alive(pid: int) -> bool:
+def _pid_alive(pid):
     try:
         os.kill(pid, 0)
         return True
@@ -37,7 +36,7 @@ def _pid_alive(pid: int) -> bool:
         return False
 
 
-def _discover_sessions() -> list[dict]:
+def _discover_sessions():
     sessions = []
     if not os.path.isdir(SESSION_DIR):
         return sessions
@@ -58,7 +57,7 @@ def _discover_sessions() -> list[dict]:
     return sessions
 
 
-def _send_python(port: int, code: str, timeout: float = 10.0) -> str:
+def _send_python(port, code, timeout=10.0):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(timeout)
     try:
@@ -82,7 +81,7 @@ def _send_python(port: int, code: str, timeout: float = 10.0) -> str:
         s.close()
 
 
-def _resolve_port(session_id: str | None) -> int | str:
+def _resolve_port(session_id):
     if session_id:
         try:
             port = int(session_id)
@@ -105,7 +104,7 @@ def _resolve_port(session_id: str | None) -> int | str:
     )
 
 
-def _register_client(port: int):
+def _register_client(port):
     os.makedirs(CLIENT_DIR, exist_ok=True)
     path = os.path.join(CLIENT_DIR, "{}_{}.json".format(port, CLIENT_ID))
     data = {
@@ -119,7 +118,7 @@ def _register_client(port: int):
         json.dump(data, f, indent=2)
 
 
-def _unregister_client(port: int):
+def _unregister_client(port):
     path = os.path.join(CLIENT_DIR, "{}_{}.json".format(port, CLIENT_ID))
     try:
         os.remove(path)
@@ -127,23 +126,25 @@ def _unregister_client(port: int):
         pass
 
 
+# ── Tool definitions ──
+
 TOOLS = [
-    Tool(
-        name="maya_list_sessions",
-        description=(
+    {
+        "name": "maya_list_sessions",
+        "description": (
             "List all active Maya sessions. Shows port, scene, Maya version, "
             "PID, and whether each is connected to this chat session."
         ),
-        inputSchema={"type": "object", "properties": {}, "required": []},
-    ),
-    Tool(
-        name="maya_connect",
-        description=(
+        "inputSchema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "maya_connect",
+        "description": (
             "Connect this chat session to a Maya session. "
             "Once connected, maya_eval can be called without specifying session_id. "
             "Multiple Maya sessions can be connected simultaneously."
         ),
-        inputSchema={
+        "inputSchema": {
             "type": "object",
             "properties": {
                 "session_id": {
@@ -153,11 +154,11 @@ TOOLS = [
             },
             "required": ["session_id"],
         },
-    ),
-    Tool(
-        name="maya_disconnect",
-        description="Disconnect this chat session from a Maya session.",
-        inputSchema={
+    },
+    {
+        "name": "maya_disconnect",
+        "description": "Disconnect this chat session from a Maya session.",
+        "inputSchema": {
             "type": "object",
             "properties": {
                 "session_id": {
@@ -167,17 +168,17 @@ TOOLS = [
             },
             "required": ["session_id"],
         },
-    ),
-    Tool(
-        name="maya_eval",
-        description=(
+    },
+    {
+        "name": "maya_eval",
+        "description": (
             "Execute Python code in a live Maya session. "
             "Code must be Python 3.9 compatible (Maya 2023). "
             "If only one Maya session is connected, session_id can be omitted. "
             "The return value is the string representation of the last expression. "
             "For complex results, use json.dumps() and print() in your code."
         ),
-        inputSchema={
+        "inputSchema": {
             "type": "object",
             "properties": {
                 "session_id": {
@@ -191,14 +192,14 @@ TOOLS = [
             },
             "required": ["code"],
         },
-    ),
-    Tool(
-        name="maya_eval_file",
-        description=(
+    },
+    {
+        "name": "maya_eval_file",
+        "description": (
             "Execute a Python script file in a live Maya session. "
             "If only one Maya session is connected, session_id can be omitted."
         ),
-        inputSchema={
+        "inputSchema": {
             "type": "object",
             "properties": {
                 "session_id": {
@@ -212,39 +213,26 @@ TOOLS = [
             },
             "required": ["file_path"],
         },
-    ),
+    },
 ]
 
-server = Server(SERVER_NAME)
+
+# ── Tool handlers ──
 
 
-@server.list_tools()
-async def list_tools() -> list[Tool]:
-    return TOOLS
-
-
-def _error(msg: str) -> list[TextContent]:
-    return [TextContent(type="text", text="[ERROR] {}".format(msg))]
-
-
-def _text(msg: str) -> list[TextContent]:
-    return [TextContent(type="text", text=msg)]
-
-
-@server.call_tool()
-async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+def handle_tool(name, arguments):
     if name == "maya_list_sessions":
         sessions = _discover_sessions()
         if not sessions:
-            return _text("No active Maya sessions found. Run maya_mcp_listener.py in Maya first.")
-        return _text(json.dumps(sessions, indent=2))
+            return "No active Maya sessions found. Run maya_mcp_listener.py in Maya first."
+        return json.dumps(sessions, indent=2)
 
     if name == "maya_connect":
         port = _resolve_port(arguments["session_id"])
         if isinstance(port, str):
-            return _error(port)
+            return "[ERROR] " + port
         if port in _connected_sessions:
-            return _text("Already connected to Maya session {} ".format(port))
+            return "Already connected to Maya session {}".format(port)
         _connected_sessions.append(port)
         _register_client(port)
         session_file = os.path.join(SESSION_DIR, "{}.json".format(port))
@@ -252,60 +240,145 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             with open(session_file) as f:
                 info = json.load(f)
             scene = os.path.basename(info.get("scene", "")) or "(unsaved)"
-            return _text("Connected to Maya session {} ({}, Maya {})".format(
-                port, scene, info.get("maya_version", "?")))
+            return "Connected to Maya session {} ({}, Maya {})".format(
+                port, scene, info.get("maya_version", "?"))
         except (json.JSONDecodeError, OSError):
-            return _text("Connected to Maya session {}".format(port))
+            return "Connected to Maya session {}".format(port)
 
     if name == "maya_disconnect":
         try:
             port = int(arguments["session_id"])
         except ValueError:
-            return _error("Invalid session ID")
+            return "[ERROR] Invalid session ID"
         if port not in _connected_sessions:
-            return _error("Not connected to session {}".format(port))
+            return "[ERROR] Not connected to session {}".format(port)
         _connected_sessions.remove(port)
         _unregister_client(port)
-        return _text("Disconnected from Maya session {}".format(port))
+        return "Disconnected from Maya session {}".format(port)
 
     if name == "maya_eval":
         port = _resolve_port(arguments.get("session_id"))
         if isinstance(port, str):
-            return _error(port)
+            return "[ERROR] " + port
         _register_client(port)
         result = _send_python(port, arguments["code"])
-        return _text(result if result else "(no output)")
+        return result if result else "(no output)"
 
     if name == "maya_eval_file":
         port = _resolve_port(arguments.get("session_id"))
         if isinstance(port, str):
-            return _error(port)
+            return "[ERROR] " + port
         file_path = arguments["file_path"]
         if not os.path.isfile(file_path):
-            return _error("File not found: {}".format(file_path))
+            return "[ERROR] File not found: {}".format(file_path)
         _register_client(port)
         with open(file_path) as f:
             code = f.read()
         result = _send_python(port, code)
-        return _text(result if result else "(no output)")
+        return result if result else "(no output)"
 
-    return _error("Unknown tool: {}".format(name))
+    return "[ERROR] Unknown tool: {}".format(name)
 
 
-async def run():
-    async with mcp.server.stdio.stdio_server() as (read, write):
-        await server.run(
-            read, write,
-            InitializationOptions(
-                server_name=SERVER_NAME,
-                server_version="0.1.0",
-                capabilities=server.get_capabilities(
-                    notification_options=None,
-                    experimental_capabilities={},
-                ),
-            ),
-        )
+# ── MCP JSON-RPC protocol over stdio ──
+
+
+def _write_response(response):
+    body = json.dumps(response)
+    header = "Content-Length: {}\r\n\r\n".format(len(body))
+    sys.stdout.write(header + body)
+    sys.stdout.flush()
+
+
+def _read_request():
+    headers = {}
+    while True:
+        line = sys.stdin.readline()
+        if not line:
+            return None
+        line = line.strip()
+        if line == "":
+            break
+        if ":" in line:
+            key, value = line.split(":", 1)
+            headers[key.strip()] = value.strip()
+
+    content_length = int(headers.get("Content-Length", 0))
+    if content_length == 0:
+        return None
+    body = sys.stdin.read(content_length)
+    return json.loads(body)
+
+
+def _handle_request(request):
+    method = request.get("method", "")
+    req_id = request.get("id")
+    params = request.get("params", {})
+
+    if method == "initialize":
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
+                "capabilities": {"tools": {}},
+            },
+        }
+
+    if method == "notifications/initialized":
+        return None
+
+    if method == "tools/list":
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {"tools": TOOLS},
+        }
+
+    if method == "tools/call":
+        tool_name = params.get("name", "")
+        arguments = params.get("arguments", {})
+        result_text = handle_tool(tool_name, arguments)
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "content": [{"type": "text", "text": result_text}],
+            },
+        }
+
+    if method == "ping":
+        return {"jsonrpc": "2.0", "id": req_id, "result": {}}
+
+    if req_id is not None:
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "error": {"code": -32601, "message": "Method not found: {}".format(method)},
+        }
+    return None
+
+
+def main():
+    if sys.platform == "win32":
+        import msvcrt
+        msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
+        msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
+        sys.stdin = open(sys.stdin.fileno(), "r", encoding="utf-8", newline="")
+        sys.stdout = open(sys.stdout.fileno(), "w", encoding="utf-8", newline="")
+
+    while True:
+        try:
+            request = _read_request()
+            if request is None:
+                break
+            response = _handle_request(request)
+            if response is not None:
+                _write_response(response)
+        except Exception:
+            break
 
 
 if __name__ == "__main__":
-    asyncio.run(run())
+    main()

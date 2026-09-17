@@ -1,1 +1,1 @@
-mcp
+# No external dependencies — MCP protocol implemented directly.
