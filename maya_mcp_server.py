@@ -349,20 +349,34 @@ def handle_tool(name, arguments):
 # ── MCP JSON-RPC protocol over stdio ──
 
 
+_stdin = None
+_stdout = None
+
+
+def _init_io():
+    global _stdin, _stdout
+    if sys.platform == "win32":
+        import msvcrt
+        msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
+        msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
+    _stdin = sys.stdin.buffer
+    _stdout = sys.stdout.buffer
+
+
 def _write_response(response):
-    body = json.dumps(response)
-    header = "Content-Length: {}\r\n\r\n".format(len(body))
-    sys.stdout.write(header + body)
-    sys.stdout.flush()
+    body = json.dumps(response).encode("utf-8")
+    header = "Content-Length: {}\r\n\r\n".format(len(body)).encode("ascii")
+    _stdout.write(header + body)
+    _stdout.flush()
 
 
 def _read_request():
     headers = {}
     while True:
-        line = sys.stdin.readline()
+        line = _stdin.readline()
         if not line:
             return None
-        line = line.strip()
+        line = line.decode("ascii").strip()
         if line == "":
             break
         if ":" in line:
@@ -372,8 +386,8 @@ def _read_request():
     content_length = int(headers.get("Content-Length", 0))
     if content_length == 0:
         return None
-    body = sys.stdin.read(content_length)
-    return json.loads(body)
+    body = _stdin.read(content_length)
+    return json.loads(body.decode("utf-8"))
 
 
 def _handle_request(request):
@@ -427,12 +441,7 @@ def _handle_request(request):
 
 
 def main():
-    if sys.platform == "win32":
-        import msvcrt
-        msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
-        msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
-        sys.stdin = open(sys.stdin.fileno(), "r", encoding="utf-8", newline="")
-        sys.stdout = open(sys.stdout.fileno(), "w", encoding="utf-8", newline="")
+    _init_io()
 
     while True:
         try:
