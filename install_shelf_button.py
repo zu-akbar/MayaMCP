@@ -29,7 +29,15 @@ def install():
             except RuntimeError:
                 pass
 
-    click_cmd = 'import maya.utils; maya.utils.executeDeferred(lambda: exec(open("{}").read()))'.format(LISTENER_PATH)
+    click_cmd = (
+        'import importlib.util, sys, maya.utils\n'
+        'def _mcp_open():\n'
+        '    if "maya_mcp_listener" in sys.modules: del sys.modules["maya_mcp_listener"]\n'
+        '    spec = importlib.util.spec_from_file_location("maya_mcp_listener", "{path}")\n'
+        '    mod = importlib.util.module_from_spec(spec)\n'
+        '    spec.loader.exec_module(mod)\n'
+        'maya.utils.executeDeferred(_mcp_open)\n'
+    ).format(path=LISTENER_PATH)
 
     kwargs = {
         "parent": target_shelf,

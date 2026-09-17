@@ -184,6 +184,8 @@ def stop():
 
 
 def _create_shelf_button():
+    button_name = SHELF_BUTTON_NAME
+    icon_path = ICON_PATH
     target_shelf = "Custom"
     shelf_top = maya.mel.eval("$tmpVar=$gShelfTopLevel")
     if not cmds.shelfLayout(target_shelf, exists=True):
@@ -193,23 +195,31 @@ def _create_shelf_button():
     for child in existing:
         if cmds.shelfButton(child, query=True, exists=True):
             try:
-                if cmds.shelfButton(child, query=True, label=True) == SHELF_BUTTON_NAME:
+                if cmds.shelfButton(child, query=True, label=True) == button_name:
                     cmds.deleteUI(child)
             except RuntimeError:
                 pass
 
     listener_path = os.path.join(_SCRIPT_DIR, "maya_mcp_listener.py").replace("\\", "/")
-    click_cmd = 'import maya.utils; maya.utils.executeDeferred(lambda: exec(open("{}").read()))'.format(listener_path)
+    click_cmd = (
+        'import importlib.util, sys, maya.utils\n'
+        'def _mcp_open():\n'
+        '    if "maya_mcp_listener" in sys.modules: del sys.modules["maya_mcp_listener"]\n'
+        '    spec = importlib.util.spec_from_file_location("maya_mcp_listener", "{path}")\n'
+        '    mod = importlib.util.module_from_spec(spec)\n'
+        '    spec.loader.exec_module(mod)\n'
+        'maya.utils.executeDeferred(_mcp_open)\n'
+    ).format(path=listener_path)
 
     kwargs = {
         "parent": target_shelf,
-        "label": SHELF_BUTTON_NAME,
+        "label": button_name,
         "annotation": "MCP Listener - connect AI harness to Maya",
         "command": click_cmd,
         "sourceType": "python",
     }
-    if os.path.isfile(ICON_PATH):
-        kwargs["image"] = ICON_PATH
+    if os.path.isfile(icon_path):
+        kwargs["image"] = icon_path
         kwargs["imageOverlayLabel"] = ""
     else:
         kwargs["image"] = "pythonFamily.png"
