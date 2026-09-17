@@ -35,6 +35,7 @@ def install():
         '    if "maya_mcp_listener" in sys.modules: del sys.modules["maya_mcp_listener"]\n'
         '    spec = importlib.util.spec_from_file_location("maya_mcp_listener", "{path}")\n'
         '    mod = importlib.util.module_from_spec(spec)\n'
+        '    sys.modules["maya_mcp_listener"] = mod\n'
         '    spec.loader.exec_module(mod)\n'
         'maya.utils.executeDeferred(_mcp_open)\n'
     ).format(path=LISTENER_PATH)
