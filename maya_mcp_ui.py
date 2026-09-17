@@ -105,8 +105,22 @@ class McpListenerWidget(QWidget):
         return sys.modules.get("maya_mcp_listener", self._listener)
 
     def _get_port(self):
-        mod = self._get_mod()
-        return getattr(mod, "_active_port", None) if mod else None
+        """Read active port from session files on disk — the source of truth."""
+        my_pid = os.getpid()
+        session_dir = os.path.join(tempfile.gettempdir(), "maya_mcp_sessions")
+        if not os.path.isdir(session_dir):
+            return None
+        for fname in os.listdir(session_dir):
+            if not fname.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(session_dir, fname)) as f:
+                    data = json.load(f)
+                if data.get("pid") == my_pid:
+                    return data.get("port")
+            except (json.JSONDecodeError, OSError):
+                continue
+        return None
 
     def _toggle_listener(self):
         mod = self._get_mod()
