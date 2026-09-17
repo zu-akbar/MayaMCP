@@ -8,13 +8,13 @@ import os
 import maya.cmds as cmds
 import maya.mel
 
-_SCRIPT_DIR = "C:/Users/dkZuaAkb/Dev/Git/MayaMCP"
-LISTENER_PATH = os.path.join(_SCRIPT_DIR, "maya_mcp_listener.py").replace("\\", "/")
-ICON_PATH = os.path.join(_SCRIPT_DIR, "maya-mcp-icon.jpg")
-SHELF_BUTTON_NAME = "mcpListener"
-
 
 def install():
+    _SCRIPT_DIR = "C:/Users/dkZuaAkb/Dev/Git/MayaMCP"
+    LISTENER_PATH = os.path.join(_SCRIPT_DIR, "maya_mcp_listener.py").replace("\\", "/")
+    ICON_PATH = os.path.join(_SCRIPT_DIR, "maya-mcp-icon.jpg")
+    BUTTON_NAME = "mcpListener"
+
     target_shelf = "Custom"
     shelf_top = maya.mel.eval("$tmpVar=$gShelfTopLevel")
     if not cmds.shelfLayout(target_shelf, exists=True):
@@ -24,16 +24,16 @@ def install():
     for child in existing:
         if cmds.shelfButton(child, query=True, exists=True):
             try:
-                if cmds.shelfButton(child, query=True, label=True) == SHELF_BUTTON_NAME:
+                if cmds.shelfButton(child, query=True, label=True) == BUTTON_NAME:
                     cmds.deleteUI(child)
             except RuntimeError:
                 pass
 
-    click_cmd = 'exec(open("{}").read())'.format(LISTENER_PATH)
+    click_cmd = 'import maya.utils; maya.utils.executeDeferred(lambda: exec(open("{}").read()))'.format(LISTENER_PATH)
 
     kwargs = {
         "parent": target_shelf,
-        "label": SHELF_BUTTON_NAME,
+        "label": BUTTON_NAME,
         "annotation": "MCP Listener - connect AI harness to Maya",
         "command": click_cmd,
         "sourceType": "python",
@@ -46,7 +46,7 @@ def install():
         kwargs["imageOverlayLabel"] = "MCP"
 
     cmds.shelfButton(**kwargs)
-    print("[MCP] Shelf button installed on '{}'. Click it to open the MCP Listener panel.".format(target_shelf))
+    print("[MCP] Shelf button installed on '{}'".format(target_shelf))
 
 
 install()
