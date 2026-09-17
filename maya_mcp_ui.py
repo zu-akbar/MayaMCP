@@ -1,5 +1,5 @@
 """
-Maya MCP Listener UI — shows session info and connected AI clients.
+Maya MCP Listener UI — dockable panel showing session info and connected AI clients.
 """
 import json
 import os
@@ -7,19 +7,24 @@ import tempfile
 import time
 
 from PySide2.QtCore import Qt, QTimer
-from PySide2.QtGui import QColor, QFont
+from PySide2.QtGui import QColor, QFont, QIcon
 from PySide2.QtWidgets import (
-    QDialog,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
+import maya.cmds as cmds
+from maya import OpenMayaUI
+from shiboken2 import wrapInstance
+
 CLIENT_DIR = os.path.join(tempfile.gettempdir(), "maya_mcp_clients")
 STALE_THRESHOLD_SECONDS = 120
+WORKSPACE_NAME = "mcpListenerPanel"
 
 
 def _pid_alive(pid):
@@ -30,112 +35,128 @@ def _pid_alive(pid):
         return False
 
 
-class McpListenerDialog(QDialog):
-    _instance = None
-
-    def __init__(self, port, parent=None):
+class McpListenerWidget(QWidget):
+    def __init__(self, listener_module, parent=None):
         super().__init__(parent)
-        self.port = port
-        self.setWindowTitle("Maya MCP Listener")
-        self.setMinimumWidth(420)
-        self.setMinimumHeight(280)
-        self.setWindowFlags(self.windowFlags() | Qt.Tool)
+        self._listener = listener_module
         self._build_ui()
         self._refresh_timer = QTimer(self)
-        self._refresh_timer.timeout.connect(self._refresh_clients)
+        self._refresh_timer.timeout.connect(self._refresh)
         self._refresh_timer.start(3000)
-        self._refresh_clients()
+        self._refresh()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
+        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
 
-        # Session info
-        info_widget = QWidget()
-        info_layout = QVBoxLayout(info_widget)
-        info_layout.setContentsMargins(0, 0, 0, 0)
-        info_layout.setSpacing(4)
+        # -- Header --
+        header = QLabel("Maya MCP Listener")
+        header.setFont(QFont("", 11, QFont.Bold))
+        layout.addWidget(header)
 
-        title = QLabel("Session Active")
-        title.setFont(QFont("", 12, QFont.Bold))
-        info_layout.addWidget(title)
-
-        self._status_dot = QLabel()
-        self._session_label = QLabel()
-        self._session_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-
+        # -- Status row --
         status_row = QHBoxLayout()
+        self._status_dot = QLabel("●")
+        self._status_dot.setFixedWidth(20)
+        self._status_label = QLabel("Not connected")
         status_row.addWidget(self._status_dot)
-        status_row.addWidget(self._session_label, 1)
-        info_layout.addLayout(status_row)
+        status_row.addWidget(self._status_label, 1)
+        layout.addLayout(status_row)
 
-        import maya.cmds as cmds
-        scene = cmds.file(q=True, sceneName=True) or "(unsaved)"
-        scene_short = os.path.basename(scene) if scene != "(unsaved)" else scene
-        maya_ver = cmds.about(version=True)
+        # -- Session info --
+        self._session_info = QLabel("")
+        self._session_info.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._session_info.setWordWrap(True)
+        layout.addWidget(self._session_info)
 
-        self._status_dot.setText("●")
-        self._status_dot.setStyleSheet("color: #4CAF50; font-size: 16px;")
-        self._session_label.setText(
-            "Port: {}  |  Maya {}  |  {}".format(self.port, maya_ver, scene_short)
-        )
+        # -- Start/Stop button --
+        self._toggle_btn = QPushButton("Start Listening")
+        self._toggle_btn.setMinimumHeight(32)
+        self._toggle_btn.clicked.connect(self._toggle_listener)
+        layout.addWidget(self._toggle_btn)
 
-        layout.addWidget(info_widget)
-
-        # Connected clients section
+        # -- Connected clients section --
         clients_label = QLabel("Connected AI Clients")
-        clients_label.setFont(QFont("", 10, QFont.Bold))
+        clients_label.setFont(QFont("", 9, QFont.Bold))
         layout.addWidget(clients_label)
 
         self._client_tree = QTreeWidget()
         self._client_tree.setHeaderLabels(["Client", "Last Seen", "PID"])
-        self._client_tree.setColumnWidth(0, 200)
-        self._client_tree.setColumnWidth(1, 120)
+        self._client_tree.setColumnWidth(0, 180)
+        self._client_tree.setColumnWidth(1, 110)
         self._client_tree.setRootIsDecorated(False)
         self._client_tree.setAlternatingRowColors(True)
+        self._client_tree.setMaximumHeight(150)
         layout.addWidget(self._client_tree)
 
-        self._no_clients_label = QLabel("No AI clients connected yet.\nStart a Claude Code or OpenCode session with the MCP server configured.")
+        self._no_clients_label = QLabel(
+            "No AI clients connected yet.\n"
+            "Use maya_connect in your AI harness."
+        )
         self._no_clients_label.setAlignment(Qt.AlignCenter)
-        self._no_clients_label.setStyleSheet("color: #888; padding: 20px;")
+        self._no_clients_label.setStyleSheet("color: #888; padding: 12px;")
         layout.addWidget(self._no_clients_label)
 
-    def _refresh_clients(self):
-        import maya.cmds as cmds
-        scene = cmds.file(q=True, sceneName=True) or "(unsaved)"
-        scene_short = os.path.basename(scene) if scene != "(unsaved)" else scene
-        maya_ver = cmds.about(version=True)
-        self._session_label.setText(
-            "Port: {}  |  Maya {}  |  {}".format(self.port, maya_ver, scene_short)
-        )
+        layout.addStretch()
 
-        clients = self._discover_clients()
-        self._client_tree.clear()
-
-        if clients:
-            self._client_tree.setVisible(True)
-            self._no_clients_label.setVisible(False)
-            for c in clients:
-                item = QTreeWidgetItem([
-                    c.get("client_name", "unknown"),
-                    c.get("last_seen", ""),
-                    str(c.get("pid", "")),
-                ])
-                age = c.get("_age_seconds", 999)
-                if age > STALE_THRESHOLD_SECONDS:
-                    item.setForeground(0, QColor("#888"))
-                    item.setForeground(1, QColor("#888"))
-                    item.setText(1, c.get("last_seen", "") + " (stale)")
-                self._client_tree.addTopLevelItem(item)
+    def _toggle_listener(self):
+        if self._listener._active_port is not None:
+            self._listener.stop()
         else:
+            self._listener.start_listener()
+        self._refresh()
+
+    def _refresh(self):
+        port = self._listener._active_port
+        is_active = port is not None and self._listener._check_port_alive(port)
+
+        if is_active:
+            self._status_dot.setStyleSheet("color: #4CAF50; font-size: 16px;")
+            self._status_label.setText("Listening on port {}".format(port))
+            self._toggle_btn.setText("Stop Listening")
+
+            scene = cmds.file(q=True, sceneName=True) or "(unsaved)"
+            scene_short = os.path.basename(scene) if scene != "(unsaved)" else scene
+            maya_ver = cmds.about(version=True)
+            self._session_info.setText(
+                "Session ID: {}  |  Maya {}  |  {}".format(port, maya_ver, scene_short)
+            )
+
+            clients = self._discover_clients(port)
+            self._client_tree.clear()
+            if clients:
+                self._client_tree.setVisible(True)
+                self._no_clients_label.setVisible(False)
+                for c in clients:
+                    item = QTreeWidgetItem([
+                        c.get("client_name", "unknown"),
+                        c.get("last_seen", ""),
+                        str(c.get("pid", "")),
+                    ])
+                    age = c.get("_age_seconds", 999)
+                    if age > STALE_THRESHOLD_SECONDS:
+                        for col in range(3):
+                            item.setForeground(col, QColor("#888"))
+                        item.setText(1, c.get("last_seen", "") + " (stale)")
+                    self._client_tree.addTopLevelItem(item)
+            else:
+                self._client_tree.setVisible(False)
+                self._no_clients_label.setVisible(True)
+        else:
+            self._status_dot.setStyleSheet("color: #F44336; font-size: 16px;")
+            self._status_label.setText("Not connected")
+            self._toggle_btn.setText("Start Listening")
+            self._session_info.setText("")
+            self._client_tree.clear()
             self._client_tree.setVisible(False)
             self._no_clients_label.setVisible(True)
 
-    def _discover_clients(self):
+    def _discover_clients(self, port):
         clients = []
         if not os.path.isdir(CLIENT_DIR):
             return clients
-        prefix = "{}_".format(self.port)
+        prefix = "{}_".format(port)
         now = time.time()
         for fname in os.listdir(CLIENT_DIR):
             if not fname.startswith(prefix) or not fname.endswith(".json"):
@@ -158,16 +179,27 @@ class McpListenerDialog(QDialog):
         clients.sort(key=lambda c: c.get("_age_seconds", 0))
         return clients
 
-    def closeEvent(self, event):
-        McpListenerDialog._instance = None
-        super().closeEvent(event)
 
+def show(listener_module, icon_path=""):
+    """Open or focus the dockable MCP Listener panel."""
+    if cmds.workspaceControl(WORKSPACE_NAME, exists=True):
+        cmds.workspaceControl(WORKSPACE_NAME, edit=True, visible=True, restore=True)
+        return
 
-def show(port, parent=None):
-    if McpListenerDialog._instance is not None:
-        McpListenerDialog._instance.close()
-        McpListenerDialog._instance = None
-    dialog = McpListenerDialog(port, parent=parent)
-    McpListenerDialog._instance = dialog
-    dialog.show()
-    return dialog
+    cmds.workspaceControl(
+        WORKSPACE_NAME,
+        label="MCP Listener",
+        tabToControl=("AttributeEditor", -1),
+        initialWidth=320,
+        minimumWidth=280,
+        widthProperty="free",
+        retain=False,
+    )
+
+    ptr = OpenMayaUI.MQtUtil.findControl(WORKSPACE_NAME)
+    if ptr is None:
+        cmds.warning("[MCP] Could not find workspace control widget")
+        return
+    parent = wrapInstance(int(ptr), QWidget)
+    widget = McpListenerWidget(listener_module, parent=parent)
+    parent.layout().addWidget(widget)

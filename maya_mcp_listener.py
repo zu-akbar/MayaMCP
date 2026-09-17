@@ -3,7 +3,7 @@ Maya MCP Listener — run inside Maya to enable AI harness connections.
 
 Opens a MEL commandPort on an auto-assigned port and registers
 the session so MCP clients can discover and connect to it.
-Also creates a shelf button for easy toggling.
+Creates a shelf button that opens a dockable UI panel.
 
 Usage in Maya Script Editor (Python):
     exec(open("C:/Users/dkZuaAkb/Dev/Git/MayaMCP/maya_mcp_listener.py").read())
@@ -26,6 +26,10 @@ SESSION_DIR = os.path.join(tempfile.gettempdir(), "maya_mcp_sessions")
 ICON_PATH = os.path.join(_SCRIPT_DIR, "maya-mcp-icon.jpg")
 SHELF_BUTTON_NAME = "mcpListener"
 _active_port = None
+_watchdog_active = False
+
+
+# ── Port management ──
 
 
 def _is_port_free(port):
@@ -49,6 +53,34 @@ def _find_free_port():
     return None
 
 
+def _check_port_alive(port):
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.5)
+        s.bind(("127.0.0.1", port))
+        s.close()
+        return False
+    except OSError:
+        return True
+
+
+def _open_port(port):
+    port_name = ":{}".format(port)
+    try:
+        cmds.commandPort(port_name, close=True)
+    except RuntimeError:
+        pass
+    cmds.commandPort(
+        name=port_name,
+        sourceType="mel",
+        echoOutput=True,
+        bufferSize=4096,
+    )
+
+
+# ── Session files ──
+
+
 def _write_session_file(port):
     os.makedirs(SESSION_DIR, exist_ok=True)
     data = {
@@ -61,7 +93,6 @@ def _write_session_file(port):
     path = os.path.join(SESSION_DIR, "{}.json".format(port))
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
-    return path
 
 
 def _update_session_file(port):
@@ -87,33 +118,7 @@ def _delete_session_file(port):
         pass
 
 
-def _open_port(port):
-    port_name = ":{}".format(port)
-    try:
-        cmds.commandPort(port_name, close=True)
-    except RuntimeError:
-        pass
-    cmds.commandPort(
-        name=port_name,
-        sourceType="mel",
-        echoOutput=True,
-        bufferSize=4096,
-    )
-
-
-def _check_port_alive(port):
-    """Check if port is in use by trying to bind — avoids triggering commandPort handler."""
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(0.5)
-        s.bind(("127.0.0.1", port))
-        s.close()
-        return False  # bind succeeded = port is free = commandPort died
-    except OSError:
-        return True  # bind failed = port in use = commandPort alive
-
-
-_watchdog_active = True
+# ── Watchdog ──
 
 
 def _watchdog(port):
@@ -138,6 +143,44 @@ def _cleanup(port):
         cmds.commandPort(":{}".format(port), close=True)
     except RuntimeError:
         pass
+
+
+# ── Public API (called by UI) ──
+
+
+def start_listener():
+    global _watchdog_active, _active_port
+    _watchdog_active = True
+
+    if _active_port is not None and _check_port_alive(_active_port):
+        print("[MCP] Already listening on port {}".format(_active_port))
+        return
+
+    port = _find_free_port()
+    if port is None:
+        cmds.warning("[MCP] No free port found in range {}-{}".format(PORT_BASE, PORT_MAX))
+        return
+
+    _open_port(port)
+    _write_session_file(port)
+    _active_port = port
+    cmds.scriptJob(event=["quitApplication", lambda: _cleanup(port)])
+    _watchdog(port)
+
+    print("[MCP] Listening on port {} (sourceType=mel)".format(port))
+
+
+def stop():
+    global _active_port
+    if _active_port is not None:
+        _cleanup(_active_port)
+        print("[MCP] Stopped listener on port {}".format(_active_port))
+        _active_port = None
+    else:
+        print("[MCP] No active listener to stop")
+
+
+# ── Shelf button ──
 
 
 def _create_shelf_button():
@@ -174,54 +217,37 @@ def _create_shelf_button():
     print("[MCP] Shelf button added to '{}'".format(current_shelf))
 
 
-def stop():
-    global _active_port
-    if _active_port is not None:
-        _cleanup(_active_port)
-        print("[MCP] Stopped listener on port {}".format(_active_port))
-        _active_port = None
-    else:
-        print("[MCP] No active listener to stop")
+# ── Show UI ──
 
 
-def _show_ui(port):
+def _show_ui():
     ui_path = os.path.join(_SCRIPT_DIR, "maya_mcp_ui.py")
     if not os.path.isfile(ui_path):
         print("[MCP] UI module not found at {}".format(ui_path))
         return
     import importlib.util
-    spec = importlib.util.spec_from_file_location("maya_mcp_ui", ui_path)
+    import sys
+    mod_name = "maya_mcp_ui"
+    if mod_name in sys.modules:
+        del sys.modules[mod_name]
+    spec = importlib.util.spec_from_file_location(mod_name, ui_path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    mod.show(port)
+    mod.show(listener_module=sys.modules[__name__] if "__name__" in dir() else None, icon_path=ICON_PATH)
 
 
-def start():
-    global _watchdog_active, _active_port
-    _watchdog_active = True
+# ── Entry point ──
 
-    if _active_port is not None and _check_port_alive(_active_port):
-        print("[MCP] Already listening on port {}".format(_active_port))
-        _show_ui(_active_port)
-        return
+import sys
+_this = sys.modules.get(__name__)
+if _this is None:
+    # Running via exec() — register as a module so UI can reference us
+    import types
+    _this = types.ModuleType("maya_mcp_listener")
+    for _name in list(globals()):
+        if not _name.startswith("__"):
+            setattr(_this, _name, globals()[_name])
+    sys.modules["maya_mcp_listener"] = _this
 
-    port = _find_free_port()
-    if port is None:
-        cmds.warning("[MCP] No free port found in range {}-{}".format(PORT_BASE, PORT_MAX))
-        return
-
-    _open_port(port)
-    _write_session_file(port)
-    _active_port = port
-    cmds.scriptJob(event=["quitApplication", lambda: _cleanup(port)])
-    _watchdog(port)
-
-    print("[MCP] Listening on port {} (sourceType=mel)".format(port))
-    print("[MCP] Session registered at {}".format(
-        os.path.join(SESSION_DIR, "{}.json".format(port))
-    ))
-    _show_ui(port)
-
-
-start()
 _create_shelf_button()
+_show_ui()

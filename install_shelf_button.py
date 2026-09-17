@@ -1,5 +1,5 @@
 """
-Install the MCP Listener shelf button in Maya without starting the listener.
+Install the MCP Listener shelf button in Maya without opening the UI.
 
 Usage in Maya Script Editor (Python):
     exec(open("C:/Users/dkZuaAkb/Dev/Git/MayaMCP/install_shelf_button.py").read())
@@ -8,7 +8,7 @@ import os
 import maya.cmds as cmds
 import maya.mel
 
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__)) if "__file__" in dir() else "C:/Users/dkZuaAkb/Dev/Git/MayaMCP"
+_SCRIPT_DIR = "C:/Users/dkZuaAkb/Dev/Git/MayaMCP"
 LISTENER_PATH = os.path.join(_SCRIPT_DIR, "maya_mcp_listener.py").replace("\\", "/")
 ICON_PATH = os.path.join(_SCRIPT_DIR, "maya-mcp-icon.jpg")
 SHELF_BUTTON_NAME = "mcpListener"
@@ -44,7 +44,7 @@ def install():
         kwargs["imageOverlayLabel"] = "MCP"
 
     cmds.shelfButton(**kwargs)
-    print("[MCP] Shelf button installed on '{}'. Click it to start the MCP listener.".format(current_shelf))
+    print("[MCP] Shelf button installed on '{}'. Click it to open the MCP Listener panel.".format(current_shelf))
 
 
 install()
