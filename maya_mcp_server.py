@@ -357,45 +357,27 @@ def handle_tool(name, arguments):
 # ── MCP JSON-RPC protocol over stdio ──
 
 
-_stdin = None
-_stdout = None
-
-
 def _init_io():
-    global _stdin, _stdout
-    if sys.platform == "win32":
-        import msvcrt
-        msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
-        msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
-    _stdin = sys.stdin.buffer
-    _stdout = sys.stdout.buffer
+    pass
 
 
 def _write_response(response):
-    body = json.dumps(response).encode("utf-8")
-    header = "Content-Length: {}\r\n\r\n".format(len(body)).encode("ascii")
-    _stdout.write(header + body)
-    _stdout.flush()
+    line = json.dumps(response) + "\n"
+    sys.stdout.buffer.write(line.encode("utf-8"))
+    sys.stdout.buffer.flush()
 
 
-def _read_request():
-    headers = {}
-    while True:
-        line = _stdin.readline()
-        if not line:
-            return None
-        line = line.decode("ascii").strip()
-        if line == "":
-            break
-        if ":" in line:
-            key, value = line.split(":", 1)
-            headers[key.strip()] = value.strip()
-
-    content_length = int(headers.get("Content-Length", 0))
-    if content_length == 0:
+def _read_request(_log=None):
+    line = sys.stdin.buffer.readline()
+    if _log:
+        _log.write("  readline: {}\n".format(repr(line[:200])))
+        _log.flush()
+    if not line:
         return None
-    body = _stdin.read(content_length)
-    return json.loads(body.decode("utf-8"))
+    line = line.decode("utf-8").strip()
+    if not line:
+        return None
+    return json.loads(line)
 
 
 def _handle_request(request):
@@ -408,9 +390,9 @@ def _handle_request(request):
             "jsonrpc": "2.0",
             "id": req_id,
             "result": {
-                "protocolVersion": "2024-11-05",
+                "protocolVersion": params.get("protocolVersion", "2024-11-05"),
                 "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
-                "capabilities": {"tools": {}},
+                "capabilities": {"tools": {"listChanged": False}},
             },
         }
 
@@ -450,17 +432,33 @@ def _handle_request(request):
 
 def main():
     _init_io()
+    log = open(os.path.join(tempfile.gettempdir(), "maya_mcp_server.log"), "w")
+    log.write("Server starting, platform={}, python={}\n".format(sys.platform, sys.version))
+    log.write("stdin isatty={}, stdout isatty={}\n".format(sys.stdin.isatty(), sys.stdout.isatty()))
+    log.write("stdin closed={}, readable={}\n".format(sys.stdin.closed, hasattr(sys.stdin, 'readable') and sys.stdin.readable()))
+    log.flush()
 
     while True:
         try:
-            request = _read_request()
+            log.write("Waiting for request...\n")
+            log.flush()
+            request = _read_request(_log=log)
             if request is None:
+                log.write("Got None from _read_request, exiting\n")
                 break
+            log.write("REQ: {}\n".format(json.dumps(request)[:300]))
+            log.flush()
             response = _handle_request(request)
             if response is not None:
+                log.write("RES: {}\n".format(json.dumps(response)[:300]))
+                log.flush()
                 _write_response(response)
         except Exception:
+            import traceback
+            log.write("ERROR: {}\n".format(traceback.format_exc()))
+            log.flush()
             break
+    log.close()
 
 
 if __name__ == "__main__":
