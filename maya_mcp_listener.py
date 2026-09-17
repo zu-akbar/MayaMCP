@@ -238,6 +238,7 @@ def _show_ui():
         print("[MCP] UI module not found at {}".format(ui_path))
         return
     import importlib.util
+    import sys
     mod_name = "maya_mcp_ui"
     if mod_name in sys.modules:
         del sys.modules[mod_name]
