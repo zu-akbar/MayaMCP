@@ -197,7 +197,7 @@ def _create_shelf_button():
                 pass
 
     listener_path = os.path.join(_SCRIPT_DIR, "maya_mcp_listener.py").replace("\\", "/")
-    click_cmd = 'exec(open("{}").read())'.format(listener_path)
+    click_cmd = 'import maya.utils; maya.utils.executeDeferred(lambda: exec(open("{}").read()))'.format(listener_path)
 
     kwargs = {
         "parent": current_shelf,
@@ -226,28 +226,29 @@ def _show_ui():
         print("[MCP] UI module not found at {}".format(ui_path))
         return
     import importlib.util
-    import sys
     mod_name = "maya_mcp_ui"
     if mod_name in sys.modules:
         del sys.modules[mod_name]
     spec = importlib.util.spec_from_file_location(mod_name, ui_path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    mod.show(listener_module=sys.modules[__name__] if "__name__" in dir() else None, icon_path=ICON_PATH)
+    listener_mod = sys.modules.get("maya_mcp_listener")
+    mod.show(listener_module=listener_mod, icon_path=ICON_PATH)
 
 
 # ── Entry point ──
 
-import sys
-_this = sys.modules.get(__name__)
-if _this is None:
-    # Running via exec() — register as a module so UI can reference us
-    import types
-    _this = types.ModuleType("maya_mcp_listener")
-    for _name in list(globals()):
-        if not _name.startswith("__"):
-            setattr(_this, _name, globals()[_name])
-    sys.modules["maya_mcp_listener"] = _this
+import sys as _sys
+import types as _types
+
+# Register as a proper module so the UI can reference listener state
+_mod = _types.ModuleType("maya_mcp_listener")
+for _n in ["start_listener", "stop", "_active_port", "_check_port_alive",
+           "_SCRIPT_DIR", "ICON_PATH", "SESSION_DIR", "CLIENT_DIR",
+           "PORT_BASE", "PORT_MAX", "SHELF_BUTTON_NAME"]:
+    if _n in globals():
+        setattr(_mod, _n, globals()[_n])
+_sys.modules["maya_mcp_listener"] = _mod
 
 _create_shelf_button()
-_show_ui()
+maya.utils.executeDeferred(_show_ui)

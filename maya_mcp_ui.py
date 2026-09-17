@@ -100,15 +100,34 @@ class McpListenerWidget(QWidget):
 
         layout.addStretch()
 
+    def _get_port(self):
+        try:
+            import maya_mcp_listener
+            return maya_mcp_listener._active_port
+        except (ImportError, AttributeError):
+            return self._listener._active_port if self._listener else None
+
     def _toggle_listener(self):
-        if self._listener._active_port is not None:
+        if self._get_port() is not None:
             self._listener.stop()
+            # Update module global
+            try:
+                import maya_mcp_listener
+                maya_mcp_listener._active_port = None
+            except ImportError:
+                pass
         else:
             self._listener.start_listener()
+            # Sync module global
+            try:
+                import maya_mcp_listener
+                maya_mcp_listener._active_port = self._listener._active_port
+            except ImportError:
+                pass
         self._refresh()
 
     def _refresh(self):
-        port = self._listener._active_port
+        port = self._get_port()
         is_active = port is not None and self._listener._check_port_alive(port)
 
         if is_active:
