@@ -250,3 +250,4 @@ def show(listener_module, icon_path=""):
     parent = wrapInstance(int(ptr), QWidget)
     widget = McpListenerWidget(listener_module, parent=parent)
     parent.layout().addWidget(widget)
+    _raise_tab(WORKSPACE_NAME)
