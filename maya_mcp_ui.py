@@ -230,6 +230,13 @@ def show(listener_module, icon_path=""):
 
     widget = McpListenerWidget(listener_module)
     widget.show(dockable=True, floating=False)
-    widget.setDockableParameters(width=320, area="right")
+    cmds.workspaceControl(
+        widget.objectName() + "WorkspaceControl",
+        edit=True,
+        tabToControl=["AttributeEditor", -1],
+        widthProperty="preferred",
+        minimumWidth=280,
+        restore=True,
+    )
     widget.raise_()
     McpListenerWidget._instance = widget
