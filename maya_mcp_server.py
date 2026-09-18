@@ -23,6 +23,7 @@ CLIENT_DIR = os.path.join(tempfile.gettempdir(), "maya_mcp_clients")
 CLIENT_ID = str(uuid.uuid4())[:8]
 CLIENT_NAME = "{}-{}".format(platform.node(), CLIENT_ID)
 CLIENT_HARNESS = ""
+CLIENT_SESSION_NAME = ""
 
 _connected_sessions = []
 
@@ -178,6 +179,7 @@ def _register_client(port):
         "client_id": CLIENT_ID,
         "client_name": CLIENT_NAME,
         "harness": CLIENT_HARNESS,
+        "session_name": CLIENT_SESSION_NAME,
         "maya_port": port,
         "pid": os.getpid(),
         "last_seen": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -218,6 +220,10 @@ TOOLS = [
                 "session_id": {
                     "type": "string",
                     "description": "Maya session ID (port number from maya_list_sessions)",
+                },
+                "session_name": {
+                    "type": "string",
+                    "description": "A name for this chat session (e.g. 'DDSR-4497 investigation') shown in Maya's UI",
                 },
             },
             "required": ["session_id"],
@@ -296,11 +302,13 @@ def handle_tool(name, arguments):
         return json.dumps(sessions, indent=2)
 
     if name == "maya_connect":
+        global CLIENT_SESSION_NAME
         port = _resolve_port(arguments["session_id"])
         if isinstance(port, str):
             return "[ERROR] " + port
         if port in _connected_sessions:
             return "Already connected to Maya session {}".format(port)
+        CLIENT_SESSION_NAME = arguments.get("session_name", "")
         _connected_sessions.append(port)
         _register_client(port)
         session_file = os.path.join(SESSION_DIR, "{}.json".format(port))

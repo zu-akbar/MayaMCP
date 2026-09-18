@@ -88,7 +88,7 @@ class McpListenerWidget(MayaQWidgetDockableMixin, QWidget):
         layout.addWidget(clients_label)
 
         self._client_tree = QTreeWidget()
-        self._client_tree.setHeaderLabels(["Harness", "Client", "Last Seen"])
+        self._client_tree.setHeaderLabels(["Harness", "Session", "Last Seen"])
         self._client_tree.setColumnWidth(0, 100)
         self._client_tree.setColumnWidth(1, 140)
         self._client_tree.setRootIsDecorated(False)
@@ -162,9 +162,9 @@ class McpListenerWidget(MayaQWidgetDockableMixin, QWidget):
                 self._no_clients_label.setVisible(False)
                 for c in clients:
                     harness = c.get("harness", "") or "Unknown"
-                    client = c.get("client_name", "unknown")
+                    session = c.get("session_name", "") or c.get("client_id", "")
                     last_seen = c.get("last_seen", "")
-                    item = QTreeWidgetItem([harness, client, last_seen])
+                    item = QTreeWidgetItem([harness, session, last_seen])
                     age = c.get("_age_seconds", 999)
                     if age > STALE_THRESHOLD_SECONDS:
                         for col in range(3):
