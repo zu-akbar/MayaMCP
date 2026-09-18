@@ -20,8 +20,7 @@ import maya.mel
 import maya.utils
 
 _SCRIPT_DIR = "C:/Users/dkZuaAkb/Dev/Git/MayaMCP"
-PORT_BASE = 50007
-PORT_MAX = 50099
+DEFAULT_PORT = 7001
 SESSION_DIR = os.path.join(tempfile.gettempdir(), "maya_mcp_sessions")
 ICON_PATH = os.path.join(_SCRIPT_DIR, "maya-mcp-icon.jpg")
 SHELF_BUTTON_NAME = "mcpListener"
@@ -30,27 +29,6 @@ _watchdog_active = False
 
 
 # ── Port management ──
-
-
-def _is_port_free(port):
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(0.5)
-        s.bind(("127.0.0.1", port))
-        s.close()
-        return True
-    except OSError:
-        return False
-
-
-def _find_free_port():
-    for port in range(PORT_BASE, PORT_MAX + 1):
-        session_file = os.path.join(SESSION_DIR, "{}.json".format(port))
-        if os.path.exists(session_file):
-            continue
-        if _is_port_free(port):
-            return port
-    return None
 
 
 def _check_port_alive(port):
@@ -64,18 +42,19 @@ def _check_port_alive(port):
         return True
 
 
-def _open_port(port):
-    port_name = ":{}".format(port)
-    try:
-        cmds.commandPort(port_name, close=True)
-    except RuntimeError:
-        pass
-    cmds.commandPort(
-        name=port_name,
-        sourceType="mel",
-        echoOutput=True,
-        bufferSize=4096,
-    )
+def _find_open_port():
+    """Find an already-open Python commandPort.
+
+    Maya 2023 has a bug where commandPorts opened after startup don't
+    execute code (CommandPort.py bytes/str bug). Ports opened during
+    startup via userSetup.py work fine. We look for those.
+    """
+    if _check_port_alive(DEFAULT_PORT):
+        return DEFAULT_PORT
+    for port in range(50007, 50100):
+        if _check_port_alive(port):
+            return port
+    return None
 
 
 # ── Session files ──
@@ -127,8 +106,7 @@ def _watchdog(port):
 
     def _check():
         if not _check_port_alive(port):
-            print("[MCP] Port {} died, reopening...".format(port))
-            _open_port(port)
+            print("[MCP] Port {} no longer available".format(port))
         _update_session_file(port)
 
     maya.utils.executeDeferred(_check)
@@ -139,10 +117,6 @@ def _cleanup(port):
     global _watchdog_active
     _watchdog_active = False
     _delete_session_file(port)
-    try:
-        cmds.commandPort(":{}".format(port), close=True)
-    except RuntimeError:
-        pass
 
 
 # ── Public API (called by UI) ──
@@ -153,28 +127,28 @@ def start_listener():
     _watchdog_active = True
 
     if _active_port is not None and _check_port_alive(_active_port):
-        print("[MCP] Already listening on port {}".format(_active_port))
+        print("[MCP] Already registered on port {}".format(_active_port))
         return
 
-    port = _find_free_port()
+    port = _find_open_port()
     if port is None:
-        cmds.warning("[MCP] No free port found in range {}-{}".format(PORT_BASE, PORT_MAX))
+        cmds.warning("[MCP] No open Python commandPort found. "
+                     "Ensure userSetup.py opens one (e.g. port 7001).")
         return
 
-    _open_port(port)
     _write_session_file(port)
     _active_port = port
     cmds.scriptJob(event=["quitApplication", lambda: _cleanup(port)])
     _watchdog(port)
 
-    print("[MCP] Listening on port {} (sourceType=mel)".format(port))
+    print("[MCP] Registered on port {} (existing commandPort)".format(port))
 
 
 def stop():
     global _active_port
     if _active_port is not None:
         _cleanup(_active_port)
-        print("[MCP] Stopped listener on port {}".format(_active_port))
+        print("[MCP] Unregistered from port {}".format(_active_port))
         _active_port = None
     else:
         print("[MCP] No active listener to stop")
