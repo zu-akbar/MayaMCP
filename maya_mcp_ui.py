@@ -7,7 +7,7 @@ import tempfile
 import time
 
 from PySide2.QtCore import Qt, QTimer
-from PySide2.QtGui import QColor, QFont, QIcon
+from PySide2.QtGui import QColor, QFont
 from PySide2.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -19,8 +19,7 @@ from PySide2.QtWidgets import (
 )
 
 import maya.cmds as cmds
-from maya import OpenMayaUI
-from shiboken2 import wrapInstance
+from maya.app.general.mayaMixin import MayaQWidgetDockableMixin
 
 CLIENT_DIR = os.path.join(tempfile.gettempdir(), "maya_mcp_clients")
 STALE_THRESHOLD_SECONDS = 120
@@ -44,10 +43,13 @@ def _pid_alive(pid):
         return False
 
 
-class McpListenerWidget(QWidget):
+class McpListenerWidget(MayaQWidgetDockableMixin, QWidget):
+    _instance = None
+
     def __init__(self, listener_module, parent=None):
         super().__init__(parent)
         self._listener = listener_module
+        self.setObjectName(WORKSPACE_NAME)
         self._build_ui()
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self._refresh)
@@ -59,12 +61,10 @@ class McpListenerWidget(QWidget):
         layout.setSpacing(10)
         layout.setContentsMargins(10, 10, 10, 10)
 
-        # -- Header --
         header = QLabel("Maya MCP Listener")
         header.setFont(QFont("", 11, QFont.Bold))
         layout.addWidget(header)
 
-        # -- Status row --
         status_row = QHBoxLayout()
         self._status_dot = QLabel("●")
         self._status_dot.setFixedWidth(20)
@@ -73,19 +73,16 @@ class McpListenerWidget(QWidget):
         status_row.addWidget(self._status_label, 1)
         layout.addLayout(status_row)
 
-        # -- Session info --
         self._session_info = QLabel("")
         self._session_info.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self._session_info.setWordWrap(True)
         layout.addWidget(self._session_info)
 
-        # -- Start/Stop button --
         self._toggle_btn = QPushButton("Connect")
         self._toggle_btn.setMinimumHeight(32)
         self._toggle_btn.clicked.connect(self._toggle_listener)
         layout.addWidget(self._toggle_btn)
 
-        # -- Connected clients section --
         clients_label = QLabel("Connected AI Clients")
         clients_label.setFont(QFont("", 9, QFont.Bold))
         layout.addWidget(clients_label)
@@ -114,7 +111,6 @@ class McpListenerWidget(QWidget):
         return sys.modules.get("maya_mcp_listener", self._listener)
 
     def _get_port(self):
-        """Read active port from session files on disk — the source of truth."""
         my_pid = os.getpid()
         session_dir = os.path.join(tempfile.gettempdir(), "maya_mcp_sessions")
         if not os.path.isdir(session_dir):
@@ -214,40 +210,26 @@ class McpListenerWidget(QWidget):
         clients.sort(key=lambda c: c.get("_age_seconds", 0))
         return clients
 
+    def dockCloseEventTriggered(self):
+        McpListenerWidget._instance = None
 
-def _raise_tab(workspace_name):
-    """Bring the workspace control's tab to front."""
-    try:
-        parent = cmds.workspaceControl(workspace_name, query=True, tabToControl=True)
-        if parent:
-            tab_layout = parent[0] if isinstance(parent, (list, tuple)) else parent
-            cmds.tabLayout(tab_layout, edit=True, selectTab=workspace_name)
-    except RuntimeError:
-        pass
+
+def _delete_workspace():
+    if cmds.workspaceControl(WORKSPACE_NAME, exists=True):
+        cmds.workspaceControl(WORKSPACE_NAME, edit=True, close=True)
+        cmds.deleteUI(WORKSPACE_NAME, control=True)
 
 
 def show(listener_module, icon_path=""):
     """Open or focus the dockable MCP Listener panel."""
-    if cmds.workspaceControl(WORKSPACE_NAME, exists=True):
-        cmds.workspaceControl(WORKSPACE_NAME, edit=True, visible=True, restore=True)
-        _raise_tab(WORKSPACE_NAME)
+    if McpListenerWidget._instance is not None:
+        McpListenerWidget._instance.raise_()
         return
 
-    cmds.workspaceControl(
-        WORKSPACE_NAME,
-        label="MCP Listener",
-        tabToControl=("AttributeEditor", -1),
-        initialWidth=320,
-        minimumWidth=280,
-        widthProperty="free",
-        retain=False,
-    )
+    _delete_workspace()
 
-    ptr = OpenMayaUI.MQtUtil.findControl(WORKSPACE_NAME)
-    if ptr is None:
-        cmds.warning("[MCP] Could not find workspace control widget")
-        return
-    parent = wrapInstance(int(ptr), QWidget)
-    widget = McpListenerWidget(listener_module, parent=parent)
-    parent.layout().addWidget(widget)
-    _raise_tab(WORKSPACE_NAME)
+    widget = McpListenerWidget(listener_module)
+    widget.show(dockable=True, floating=False)
+    widget.setDockableParameters(width=320, area="right")
+    widget.raise_()
+    McpListenerWidget._instance = widget
