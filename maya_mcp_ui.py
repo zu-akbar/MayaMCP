@@ -215,9 +215,22 @@ class McpListenerWidget(MayaQWidgetDockableMixin, QWidget):
 
 
 def _delete_workspace():
-    if cmds.workspaceControl(WORKSPACE_NAME, exists=True):
-        cmds.workspaceControl(WORKSPACE_NAME, edit=True, close=True)
-        cmds.deleteUI(WORKSPACE_NAME, control=True)
+    """Safely delete the workspace control and any orphaned controls."""
+    ws_control = WORKSPACE_NAME + "WorkspaceControl"
+    try:
+        if cmds.workspaceControl(ws_control, exists=True):
+            cmds.workspaceControl(ws_control, edit=True, close=True)
+            cmds.deleteUI(ws_control, control=True)
+    except RuntimeError:
+        pass
+    
+    # Also try to delete the plain name in case it's registered differently
+    try:
+        if cmds.workspaceControl(WORKSPACE_NAME, exists=True):
+            cmds.workspaceControl(WORKSPACE_NAME, edit=True, close=True)
+            cmds.deleteUI(WORKSPACE_NAME, control=True)
+    except RuntimeError:
+        pass
 
 
 def show(listener_module, icon_path=""):

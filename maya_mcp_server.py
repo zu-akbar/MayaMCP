@@ -26,6 +26,7 @@ CLIENT_HARNESS = ""
 CLIENT_SESSION_NAME = ""
 
 _connected_sessions = []
+_session_names = {}  # port -> session_name
 
 # ── Maya session discovery and communication ──
 
@@ -179,7 +180,7 @@ def _register_client(port):
         "client_id": CLIENT_ID,
         "client_name": CLIENT_NAME,
         "harness": CLIENT_HARNESS,
-        "session_name": CLIENT_SESSION_NAME,
+        "session_name": _session_names.get(port, CLIENT_SESSION_NAME),
         "maya_port": port,
         "pid": os.getpid(),
         "last_seen": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -194,6 +195,7 @@ def _unregister_client(port):
         os.remove(path)
     except OSError:
         pass
+    _session_names.pop(port, None)
 
 
 # ── Tool definitions ──
@@ -308,7 +310,9 @@ def handle_tool(name, arguments):
             return "[ERROR] " + port
         if port in _connected_sessions:
             return "Already connected to Maya session {}".format(port)
-        CLIENT_SESSION_NAME = arguments.get("session_name", "")
+        session_name = arguments.get("session_name", "")
+        _session_names[port] = session_name
+        CLIENT_SESSION_NAME = session_name
         _connected_sessions.append(port)
         _register_client(port)
         session_file = os.path.join(SESSION_DIR, "{}.json".format(port))

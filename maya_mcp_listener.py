@@ -21,6 +21,7 @@ import maya.utils
 
 _SCRIPT_DIR = "C:/Users/dkZuaAkb/Dev/Git/MayaMCP"
 DEFAULT_PORT = 7001
+PORT_MAX = 7020  # Must match userSetup.py open_command_port_auto range
 SESSION_DIR = os.path.join(tempfile.gettempdir(), "maya_mcp_sessions")
 ICON_PATH = os.path.join(_SCRIPT_DIR, "maya-mcp-icon.jpg")
 SHELF_BUTTON_NAME = "mcpListener"
@@ -48,12 +49,18 @@ def _find_open_port():
     Maya 2023 has a bug where commandPorts opened after startup don't
     execute code (CommandPort.py bytes/str bug). Ports opened during
     startup via userSetup.py work fine. We look for those.
+    
+    Also checks if a session file already exists for that port (from another Maya instance)
+    and skips it to avoid collisions.
     """
-    if _check_port_alive(DEFAULT_PORT):
-        return DEFAULT_PORT
-    for port in range(50007, 50100):
+    os.makedirs(SESSION_DIR, exist_ok=True)
+
+    for port in range(DEFAULT_PORT, PORT_MAX + 1):
         if _check_port_alive(port):
-            return port
+            # Skip if another Maya instance already registered on this port
+            session_file = os.path.join(SESSION_DIR, "{}.json".format(port))
+            if not os.path.exists(session_file):
+                return port
     return None
 
 
@@ -229,7 +236,19 @@ def _on_shelf_click():
     from PySide2.QtWidgets import QMessageBox
 
     panel_name = "mcpListenerPanel"
-    if cmds.workspaceControl(panel_name, exists=True) and cmds.workspaceControl(panel_name, query=True, visible=True):
+    ws_control = panel_name + "WorkspaceControl"
+    
+    # Check if panel exists
+    panel_exists = False
+    try:
+        if cmds.workspaceControl(ws_control, exists=True):
+            panel_exists = True
+        elif cmds.workspaceControl(panel_name, exists=True):
+            panel_exists = True
+    except RuntimeError:
+        panel_exists = False
+    
+    if panel_exists:
         reply = QMessageBox.question(
             None,
             "MCP Listener",
@@ -238,7 +257,14 @@ def _on_shelf_click():
             QMessageBox.No,
         )
         if reply == QMessageBox.Yes:
-            cmds.workspaceControl(panel_name, edit=True, close=True)
+            try:
+                cmds.workspaceControl(ws_control, edit=True, close=True)
+            except RuntimeError:
+                pass
+            try:
+                cmds.deleteUI(ws_control, control=True)
+            except RuntimeError:
+                pass
             if _active_port is not None:
                 stop()
             _show_ui()

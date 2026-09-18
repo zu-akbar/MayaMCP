@@ -7,24 +7,69 @@ Lightweight MCP server that connects any AI code harness (Claude Code, OpenCode,
 ```
 ┌─────────────┐      stdio       ┌─────────────┐      TCP       ┌───────────┐
 │ Claude Code  │◄───(JSON-RPC)───►│  MCP Server  │◄──(Python)───►│   Maya    │
-│ OpenCode     │                  │              │               │  (50007)  │
+│ OpenCode     │                  │              │               │  (7001)   │
 │ Cursor       │                  │ maya_mcp_    │               ├───────────┤
 │ ...          │                  │ server.py    │◄──(Python)───►│   Maya    │
-└─────────────┘                  └─────────────┘               │  (50008)  │
+└─────────────┘                  └─────────────┘               │  (7002)   │
                                                                 └───────────┘
 ```
 
-- **`maya_mcp_listener.py`** — runs inside Maya, opens a Python commandPort and registers the session
+- **`maya_mcp_listener.py`** — runs inside Maya, registers the session with the MCP server
 - **`maya_mcp_server.py`** — MCP server (stdio), discovers Maya sessions and sends Python code to them
-- **`maya_mcp_ui.py`** — PySide2 dialog showing session info and connected AI clients
+- **`maya_mcp_ui.py`** — PySide2 dockable panel showing session info and connected AI clients
 
-Multiple Maya sessions supported simultaneously. Each gets a unique port and session ID.
+Multiple Maya sessions supported simultaneously. Each instance gets a unique port (7001, 7002, ...).
+
+## Requirements
+
+- Python 3.9+ (no external packages needed)
+- Maya 2023+
 
 ## Setup
 
-No external dependencies — the MCP protocol is implemented directly. Requires Python 3.9+.
+### 1. Configure `userSetup.py`
 
-### 1. Register the MCP server with your AI harness
+The listener relies on Python commandPorts opened **at Maya startup** via `userSetup.py`. Maya 2023 has a bug where commandPorts opened after startup do not execute Python code.
+
+Add the following to `~/Documents/maya/2023/scripts/userSetup.py`:
+
+```python
+import maya.cmds as cmds
+
+def open_command_port(port, source_type):
+    port_str = ':{}'.format(port)
+    try:
+        if not cmds.commandPort(port_str, query=True):
+            cmds.commandPort(name=port_str, sourceType=source_type, echoOutput=False)
+        return True
+    except RuntimeError:
+        return False
+
+def open_command_port_auto(source_type, port_base=7001, port_max=7020):
+    for port in range(port_base, port_max + 1):
+        if open_command_port(port, source_type):
+            return port
+    return None
+
+open_command_port_auto('python')
+```
+
+This opens the first available port in the range **7001–7020** at startup. Each Maya instance gets its own port (7001, 7002, etc.), supporting up to 20 simultaneous sessions.
+
+### 2. Register the MCP server with your AI harness
+
+**OpenCode (global)** — add to `~/.config/opencode/opencode.json`:
+```json
+{
+  "mcp": {
+    "maya": {
+      "type": "local",
+      "command": ["python", "C:/path/to/MayaMCP/maya_mcp_server.py"],
+      "enabled": true
+    }
+  }
+}
+```
 
 **Claude Code** — add `.mcp.json` to your project root:
 ```json
@@ -48,10 +93,9 @@ exec(open("C:/path/to/MayaMCP/maya_mcp_listener.py").read())
 ```
 
 This will:
-- Open a Python commandPort on an auto-assigned port (50007-50099)
-- Register the session for MCP discovery
+- Find the commandPort opened by `userSetup.py` and register the session
 - Add a shelf button to the current shelf (click to reopen the UI)
-- Show a status dialog with session info and connected clients
+- Show a dockable panel with session info and connected AI clients
 
 **Or install just the shelf button** (one-time setup):
 ```python
@@ -81,31 +125,29 @@ When only one Maya session is connected, `session_id` is optional on eval calls.
 
 ```
 1. maya_list_sessions()
-   → [{"port": 50007, "scene": "hero_asset.mb", "connected": false}, ...]
+   → [{"port": 7001, "scene": "hero_asset.mb", "connected": false},
+      {"port": 7002, "scene": "rig_v2.mb",     "connected": false}]
 
-2. maya_connect(session_id="50007")
-   → "Connected to Maya session 50007 (hero_asset.mb, Maya 2023)"
+2. maya_connect(session_id="7001", session_name="Asset Rigging")
+   → "Connected to Maya session 7001 (hero_asset.mb, Maya 2023)"
 
 3. maya_eval(code="import maya.cmds; maya.cmds.ls(assemblies=True)")
    → "['persp', 'top', 'front', 'side', 'VME_11208696']"
    (no session_id needed — only one connected)
 
-4. maya_connect(session_id="50008")
+4. maya_connect(session_id="7002", session_name="Asset Rigging")
    → now two sessions connected — must specify session_id on eval
 
-5. maya_eval(session_id="50007", code="maya.cmds.file(q=True, sceneName=True)")
+5. maya_eval(session_id="7001", code="maya.cmds.file(q=True, sceneName=True)")
    → "C:/scenes/hero_asset.mb"
 ```
 
 ## Architecture
 
 - **`sourceType="python"`** on Maya's commandPort — code sent as raw Python, no MEL wrapping
+- **Fire-and-forget** — socket closed immediately after sending to avoid Maya 2023's CommandPort.py bytes/str bug; results written to temp files
 - **Session registry** via temp files (`%TEMP%/maya_mcp_sessions/<port>.json`)
 - **Client tracking** via heartbeat files (`%TEMP%/maya_mcp_clients/<port>_<client_id>.json`)
-- **Watchdog timer** auto-reopens the port if Maya drops it
+- **Watchdog timer** monitors port health and updates session metadata every 5 seconds
 - **Stale cleanup** — dead sessions/clients detected by PID check and removed automatically
-
-## Requirements
-
-- Python 3.9+ (no external packages needed)
-- Maya 2023+ (code sent to Maya must be compatible with Maya's Python version)
+- **Port collision detection** — listener skips already-registered ports so multiple Maya instances each get a unique port
