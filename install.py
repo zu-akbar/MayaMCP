@@ -1,5 +1,5 @@
 """
-Maya MCP installer — sets up the MCP server, skill, and userSetup.py.
+Maya MCP installer -- sets up the MCP server, skill, and userSetup.py.
 Run from the MayaMCP directory:
     python install.py
 """
@@ -7,6 +7,10 @@ import json
 import os
 import shutil
 import sys
+
+# Fix Windows console encoding
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SERVER_PATH = os.path.join(HERE, "maya_mcp_server.py").replace("\\", "/")
@@ -69,7 +73,7 @@ def prompt_choice(msg, choices):
 
 
 def install_mcp_server():
-    print("\n── MCP Server Registration ──")
+    print("\n-- MCP Server Registration --")
     if not prompt("Register the MCP server with your AI harness?"):
         return
 
@@ -102,7 +106,7 @@ def install_mcp_server():
 
 
 def install_skill():
-    print("\n── Skill Installation ──")
+    print("\n-- Skill Installation --")
     if not prompt("Install the maya-mcp skill for your AI harness?"):
         return
 
@@ -120,7 +124,7 @@ def install_skill():
 
 
 def patch_usersetup():
-    print("\n── userSetup.py ──")
+    print("\n-- userSetup.py --")
     print("  Maya MCP requires a Python commandPort opened at Maya startup.")
     print("  This can be added to your userSetup.py automatically.")
 

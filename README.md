@@ -147,14 +147,14 @@ When only one Maya session is connected, `session_id` is optional on eval calls.
    → [{"port": 7001, "scene": "hero_asset.mb", "connected": false},
       {"port": 7002, "scene": "rig_v2.mb",     "connected": false}]
 
-2. maya_connect(session_id="7001", session_name="Asset Rigging")
+2. maya_connect(session_id="7001", session_name="Live Maya connection from chat")
    → "Connected to Maya session 7001 (hero_asset.mb, Maya 2023)"
 
 3. maya_eval(code="import maya.cmds; maya.cmds.ls(assemblies=True)")
    → "['persp', 'top', 'front', 'side', 'VME_11208696']"
    (no session_id needed — only one connected)
 
-4. maya_connect(session_id="7002", session_name="Asset Rigging")
+4. maya_connect(session_id="7002", session_name="Live Maya connection from chat")
    → now two sessions connected — must specify session_id on eval
 
 5. maya_eval(session_id="7001", code="maya.cmds.file(q=True, sceneName=True)")
