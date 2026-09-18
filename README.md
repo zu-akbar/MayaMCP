@@ -25,18 +25,32 @@ Multiple Maya sessions supported simultaneously. Each instance gets a unique por
 - Python 3.9+ (no external packages needed)
 - Maya 2023+
 
-## Setup
+## Install
 
-### 1. Configure `userSetup.py`
+Run the installer and follow the prompts:
 
-The listener relies on Python commandPorts opened **at Maya startup** via `userSetup.py`. Maya 2023 has a bug where commandPorts opened after startup do not execute Python code.
+```
+python install.py
+```
+
+The installer handles three steps — each is independently skippable:
+
+1. **MCP server registration** — global (`~/.config/opencode/opencode.json`) or per-project (`.mcp.json`)
+2. **Skill installation** — global (`~/.claude/skills/`) or per-project (`.opencode/skills/`)
+3. **`userSetup.py` patching** — shows exactly what will be added before writing
+
+### Manual setup
+
+#### 1. `userSetup.py`
+
+Maya MCP requires a Python commandPort opened **at Maya startup**. Maya 2023 has a bug where commandPorts opened after startup do not execute Python code.
 
 Add the following to `~/Documents/maya/2023/scripts/userSetup.py`:
 
 ```python
 import maya.cmds as cmds
 
-def open_command_port(port, source_type):
+def _mcp_open_port(port, source_type):
     port_str = ':{}'.format(port)
     try:
         if not cmds.commandPort(port_str, query=True):
@@ -45,18 +59,18 @@ def open_command_port(port, source_type):
     except RuntimeError:
         return False
 
-def open_command_port_auto(source_type, port_base=7001, port_max=7020):
+def _mcp_open_port_auto(source_type, port_base=7001, port_max=7020):
     for port in range(port_base, port_max + 1):
-        if open_command_port(port, source_type):
+        if _mcp_open_port(port, source_type):
             return port
     return None
 
-open_command_port_auto('python')
+_mcp_open_port_auto('python')
 ```
 
-This opens the first available port in the range **7001–7020** at startup. Each Maya instance gets its own port (7001, 7002, etc.), supporting up to 20 simultaneous sessions.
+Each Maya instance gets its own port (7001, 7002, ...), supporting up to 20 simultaneous sessions.
 
-### 2. Register the MCP server with your AI harness
+#### 2. MCP server
 
 **OpenCode (global)** — add to `~/.config/opencode/opencode.json`:
 ```json
@@ -64,32 +78,37 @@ This opens the first available port in the range **7001–7020** at startup. Eac
   "mcp": {
     "maya": {
       "type": "local",
-      "command": ["python", "C:/path/to/MayaMCP/maya_mcp_server.py"],
+      "command": ["python", "<path/to/MayaMCP>/maya_mcp_server.py"],
       "enabled": true
     }
   }
 }
 ```
 
-**Claude Code** — add `.mcp.json` to your project root:
+**Claude Code / other MCP clients** — add `.mcp.json` to your project root:
 ```json
 {
   "mcpServers": {
     "maya": {
       "command": "python",
-      "args": ["C:/path/to/MayaMCP/maya_mcp_server.py"]
+      "args": ["<path/to/MayaMCP>/maya_mcp_server.py"]
     }
   }
 }
 ```
 
-**Other MCP clients** — point to `python` + `maya_mcp_server.py` via stdio transport.
+#### 3. Skill
 
-### 3. Start the listener in Maya
+Copy `skill/SKILL.md` to your skill directory:
+
+- **Global:** `~/.claude/skills/maya-mcp/SKILL.md`
+- **Per-project:** `.opencode/skills/maya-mcp/SKILL.md`
+
+#### 4. Start the listener in Maya
 
 Run in Maya's Python Script Editor:
 ```python
-exec(open("C:/path/to/MayaMCP/maya_mcp_listener.py").read())
+exec(open("<path/to/MayaMCP>/maya_mcp_listener.py").read())
 ```
 
 This will:
@@ -99,7 +118,7 @@ This will:
 
 **Or install just the shelf button** (one-time setup):
 ```python
-exec(open("C:/path/to/MayaMCP/install_shelf_button.py").read())
+exec(open("<path/to/MayaMCP>/install_shelf_button.py").read())
 ```
 
 ## MCP Tools
