@@ -80,7 +80,7 @@ class McpListenerWidget(QWidget):
         layout.addWidget(self._session_info)
 
         # -- Start/Stop button --
-        self._toggle_btn = QPushButton("Start Listening")
+        self._toggle_btn = QPushButton("Connect")
         self._toggle_btn.setMinimumHeight(32)
         self._toggle_btn.clicked.connect(self._toggle_listener)
         layout.addWidget(self._toggle_btn)
@@ -150,7 +150,7 @@ class McpListenerWidget(QWidget):
         if is_active:
             self._status_dot.setStyleSheet("color: #4CAF50; font-size: 16px;")
             self._status_label.setText("Listening on port {}".format(port))
-            self._toggle_btn.setText("Stop Listening")
+            self._toggle_btn.setText("Disconnect")
 
             scene = cmds.file(q=True, sceneName=True) or "(unsaved)"
             scene_short = os.path.basename(scene) if scene != "(unsaved)" else scene
@@ -182,7 +182,7 @@ class McpListenerWidget(QWidget):
         else:
             self._status_dot.setStyleSheet("color: #F44336; font-size: 16px;")
             self._status_label.setText("Not connected")
-            self._toggle_btn.setText("Start Listening")
+            self._toggle_btn.setText("Connect")
             self._session_info.setText("")
             self._client_tree.clear()
             self._client_tree.setVisible(False)

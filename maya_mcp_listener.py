@@ -101,10 +101,12 @@ def _delete_session_file(port):
 
 
 def _watchdog(port):
-    if not _watchdog_active:
+    if not _watchdog_active or _active_port is None:
         return
 
     def _check():
+        if _active_port is None:
+            return
         if not _check_port_alive(port):
             print("[MCP] Port {} no longer available".format(port))
         _update_session_file(port)
@@ -113,20 +115,13 @@ def _watchdog(port):
     threading.Timer(5.0, _watchdog, args=[port]).start()
 
 
-def _cleanup(port):
-    global _watchdog_active
-    _watchdog_active = False
-    _delete_session_file(port)
-
-
 # ── Public API (called by UI) ──
 
 
 def start_listener():
     global _watchdog_active, _active_port
-    _watchdog_active = True
 
-    if _active_port is not None and _check_port_alive(_active_port):
+    if _active_port is not None:
         print("[MCP] Already registered on port {}".format(_active_port))
         return
 
@@ -136,22 +131,25 @@ def start_listener():
                      "Ensure userSetup.py opens one (e.g. port 7001).")
         return
 
+    _watchdog_active = True
     _write_session_file(port)
     _active_port = port
-    cmds.scriptJob(event=["quitApplication", lambda: _cleanup(port)])
+    cmds.scriptJob(event=["quitApplication", lambda: stop()])
     _watchdog(port)
 
     print("[MCP] Registered on port {} (existing commandPort)".format(port))
 
 
 def stop():
-    global _active_port
-    if _active_port is not None:
-        _cleanup(_active_port)
-        print("[MCP] Unregistered from port {}".format(_active_port))
+    global _active_port, _watchdog_active
+    port = _active_port
+    if port is not None:
+        _watchdog_active = False
         _active_port = None
+        _delete_session_file(port)
+        print("[MCP] Unregistered from port {}".format(port))
     else:
-        print("[MCP] No active listener to stop")
+        print("[MCP] Not registered")
 
 
 # ── Shelf button ──
