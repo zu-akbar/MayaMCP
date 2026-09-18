@@ -65,39 +65,28 @@ def _discover_sessions():
     return sessions
 
 
-def _send_mel(port, mel_cmd, timeout=10.0):
+def _fire_and_forget(port, python_code):
+    """Send Python code to Maya's commandPort and close immediately.
+
+    Maya 2023 has a bug in CommandPort.py where returning results over the
+    socket raises TypeError (bytes vs str). We avoid this by closing the
+    socket right after sending — no response read. Results go through temp files.
+    """
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(timeout)
+    s.settimeout(5)
     try:
         s.connect(("127.0.0.1", port))
-        s.sendall((mel_cmd + "\n").encode("utf-8"))
-        time.sleep(0.5)
-        result = b""
-        try:
-            while True:
-                chunk = s.recv(8192)
-                if not chunk:
-                    break
-                result += chunk
-                if len(chunk) < 8192:
-                    break
-        except socket.timeout:
-            pass
-        return result.decode("utf-8").strip().replace(chr(0), "")
-    except socket.timeout:
-        return "[ERROR] Timeout waiting for Maya response"
-    except ConnectionRefusedError:
-        return "[ERROR] Connection refused — Maya session may be closed"
-    except (ConnectionAbortedError, ConnectionResetError):
-        return "[ERROR] Connection aborted — command may have errored in Maya"
+        s.sendall(python_code.encode("utf-8"))
+        s.shutdown(socket.SHUT_WR)
     except Exception as e:
         return "[ERROR] {}".format(e)
     finally:
         s.close()
+    return None
 
 
 def _send_python(port, code, timeout=15.0):
-    """Write Python to a temp file, tell Maya to exec it via MEL, read result from output file."""
+    """Send Python to Maya via commandPort (sourceType=python), read result from temp file."""
     cmd_dir = os.path.join(tempfile.gettempdir(), "maya_mcp_cmds")
     os.makedirs(cmd_dir, exist_ok=True)
 
@@ -105,32 +94,37 @@ def _send_python(port, code, timeout=15.0):
     cmd_file = os.path.join(cmd_dir, "{}.py".format(cmd_id)).replace("\\", "/")
     out_file = os.path.join(cmd_dir, "{}.out".format(cmd_id)).replace("\\", "/")
 
-    wrapper = (
-        "import sys, io, traceback, json\n"
-        "_mcp_out = io.StringIO()\n"
-        "_mcp_old_stdout = sys.stdout\n"
-        "sys.stdout = _mcp_out\n"
+    with open(cmd_file, "w") as f:
+        f.write(code)
+
+    bootstrap = (
+        "import sys as _s, io as _io, traceback as _tb\n"
+        "_mcp_buf = _io.StringIO()\n"
+        "_mcp_old = _s.stdout\n"
+        "_s.stdout = _mcp_buf\n"
         "_mcp_err = None\n"
         "try:\n"
         "    exec(open('{cmd_file}').read())\n"
         "except Exception:\n"
-        "    _mcp_err = traceback.format_exc()\n"
+        "    _mcp_err = _tb.format_exc()\n"
         "finally:\n"
-        "    sys.stdout = _mcp_old_stdout\n"
-        "_mcp_result = _mcp_err if _mcp_err else _mcp_out.getvalue()\n"
+        "    _s.stdout = _mcp_old\n"
+        "_mcp_r = _mcp_err if _mcp_err else _mcp_buf.getvalue()\n"
         "with open('{out_file}', 'w') as _f:\n"
-        "    _f.write(_mcp_result)\n"
+        "    _f.write(_mcp_r)\n"
     ).format(cmd_file=cmd_file, out_file=out_file)
 
-    with open(cmd_file, "w") as f:
-        f.write(code)
+    log = open(os.path.join(tempfile.gettempdir(), "maya_mcp_eval.log"), "w")
+    log.write("port={} cmd_file={} out_file={}\n".format(port, cmd_file, out_file))
+    log.write("bootstrap_len={}\n".format(len(bootstrap)))
+    log.flush()
 
-    wrapper_file = os.path.join(cmd_dir, "{}_wrap.py".format(cmd_id)).replace("\\", "/")
-    with open(wrapper_file, "w") as f:
-        f.write(wrapper)
-
-    mel_cmd = "python(\"exec(open('{}').read())\")".format(wrapper_file)
-    _send_mel(port, mel_cmd, timeout=timeout)
+    err = _fire_and_forget(port, bootstrap)
+    log.write("fire_and_forget result={}\n".format(repr(err)))
+    log.flush()
+    if err:
+        log.close()
+        return err
 
     # Wait for output file
     for _ in range(int(timeout * 4)):
@@ -140,7 +134,6 @@ def _send_python(port, code, timeout=15.0):
                 result = f.read()
             try:
                 os.remove(cmd_file)
-                os.remove(wrapper_file)
                 os.remove(out_file)
             except OSError:
                 pass
@@ -149,7 +142,6 @@ def _send_python(port, code, timeout=15.0):
 
     try:
         os.remove(cmd_file)
-        os.remove(wrapper_file)
     except OSError:
         pass
     return "[ERROR] Timeout — Maya did not produce output"
