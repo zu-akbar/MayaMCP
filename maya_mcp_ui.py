@@ -91,9 +91,9 @@ class McpListenerWidget(QWidget):
         layout.addWidget(clients_label)
 
         self._client_tree = QTreeWidget()
-        self._client_tree.setHeaderLabels(["Client", "Last Seen", "PID"])
-        self._client_tree.setColumnWidth(0, 180)
-        self._client_tree.setColumnWidth(1, 110)
+        self._client_tree.setHeaderLabels(["Harness", "Client", "Last Seen"])
+        self._client_tree.setColumnWidth(0, 100)
+        self._client_tree.setColumnWidth(1, 140)
         self._client_tree.setRootIsDecorated(False)
         self._client_tree.setAlternatingRowColors(True)
         self._client_tree.setMaximumHeight(150)
@@ -165,16 +165,15 @@ class McpListenerWidget(QWidget):
                 self._client_tree.setVisible(True)
                 self._no_clients_label.setVisible(False)
                 for c in clients:
-                    item = QTreeWidgetItem([
-                        c.get("client_name", "unknown"),
-                        c.get("last_seen", ""),
-                        str(c.get("pid", "")),
-                    ])
+                    harness = c.get("harness", "") or "Unknown"
+                    client = c.get("client_name", "unknown")
+                    last_seen = c.get("last_seen", "")
+                    item = QTreeWidgetItem([harness, client, last_seen])
                     age = c.get("_age_seconds", 999)
                     if age > STALE_THRESHOLD_SECONDS:
                         for col in range(3):
                             item.setForeground(col, QColor("#888"))
-                        item.setText(1, c.get("last_seen", "") + " (stale)")
+                        item.setText(2, last_seen + " (stale)")
                     self._client_tree.addTopLevelItem(item)
             else:
                 self._client_tree.setVisible(False)
@@ -216,10 +215,22 @@ class McpListenerWidget(QWidget):
         return clients
 
 
+def _raise_tab(workspace_name):
+    """Bring the workspace control's tab to front."""
+    try:
+        parent = cmds.workspaceControl(workspace_name, query=True, tabToControl=True)
+        if parent:
+            tab_layout = parent[0] if isinstance(parent, (list, tuple)) else parent
+            cmds.tabLayout(tab_layout, edit=True, selectTab=workspace_name)
+    except RuntimeError:
+        pass
+
+
 def show(listener_module, icon_path=""):
     """Open or focus the dockable MCP Listener panel."""
     if cmds.workspaceControl(WORKSPACE_NAME, exists=True):
         cmds.workspaceControl(WORKSPACE_NAME, edit=True, visible=True, restore=True)
+        _raise_tab(WORKSPACE_NAME)
         return
 
     cmds.workspaceControl(

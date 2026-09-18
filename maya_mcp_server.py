@@ -22,6 +22,7 @@ SESSION_DIR = os.path.join(tempfile.gettempdir(), "maya_mcp_sessions")
 CLIENT_DIR = os.path.join(tempfile.gettempdir(), "maya_mcp_clients")
 CLIENT_ID = str(uuid.uuid4())[:8]
 CLIENT_NAME = "{}-{}".format(platform.node(), CLIENT_ID)
+CLIENT_HARNESS = ""
 
 _connected_sessions = []
 
@@ -176,6 +177,7 @@ def _register_client(port):
     data = {
         "client_id": CLIENT_ID,
         "client_name": CLIENT_NAME,
+        "harness": CLIENT_HARNESS,
         "maya_port": port,
         "pid": os.getpid(),
         "last_seen": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -378,6 +380,9 @@ def _handle_request(request):
     params = request.get("params", {})
 
     if method == "initialize":
+        global CLIENT_HARNESS
+        client_info = params.get("clientInfo", {})
+        CLIENT_HARNESS = client_info.get("title", client_info.get("name", ""))
         return {
             "jsonrpc": "2.0",
             "id": req_id,
