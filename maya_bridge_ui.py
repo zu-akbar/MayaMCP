@@ -1,5 +1,5 @@
 """
-Maya MCP Listener UI — dockable panel showing session info and connected AI clients.
+Maya Bridge UI — dockable panel showing session info and connected AI clients.
 """
 import json
 import os
@@ -21,9 +21,9 @@ from PySide2.QtWidgets import (
 import maya.cmds as cmds
 from maya.app.general.mayaMixin import MayaQWidgetDockableMixin
 
-CLIENT_DIR = os.path.join(tempfile.gettempdir(), "maya_mcp_clients")
+CLIENT_DIR = os.path.join(tempfile.gettempdir(), "maya_bridge_clients")
 STALE_THRESHOLD_SECONDS = 120
-WORKSPACE_NAME = "mcpListenerPanel"
+WORKSPACE_NAME = "mayaBridgePanel"
 
 
 def _pid_alive(pid):
@@ -43,7 +43,7 @@ def _pid_alive(pid):
         return False
 
 
-class McpListenerWidget(MayaQWidgetDockableMixin, QWidget):
+class MayaBridgeWidget(MayaQWidgetDockableMixin, QWidget):
     _instance = None
 
     def __init__(self, listener_module, parent=None):
@@ -61,7 +61,7 @@ class McpListenerWidget(MayaQWidgetDockableMixin, QWidget):
         layout.setSpacing(10)
         layout.setContentsMargins(10, 10, 10, 10)
 
-        header = QLabel("Maya MCP Listener")
+        header = QLabel("Maya Bridge")
         header.setFont(QFont("", 11, QFont.Bold))
         layout.addWidget(header)
 
@@ -98,7 +98,7 @@ class McpListenerWidget(MayaQWidgetDockableMixin, QWidget):
 
         self._no_clients_label = QLabel(
             "No AI clients connected yet.\n"
-            "Use maya_connect in your AI harness."
+            "Use 'maya_bridge.py connect' in your AI harness."
         )
         self._no_clients_label.setAlignment(Qt.AlignCenter)
         self._no_clients_label.setStyleSheet("color: #888; padding: 12px;")
@@ -108,11 +108,11 @@ class McpListenerWidget(MayaQWidgetDockableMixin, QWidget):
 
     def _get_mod(self):
         import sys
-        return sys.modules.get("maya_mcp_listener", self._listener)
+        return sys.modules.get("maya_bridge_listener", self._listener)
 
     def _get_port(self):
         my_pid = os.getpid()
-        session_dir = os.path.join(tempfile.gettempdir(), "maya_mcp_sessions")
+        session_dir = os.path.join(tempfile.gettempdir(), "maya_bridge_sessions")
         if not os.path.isdir(session_dir):
             return None
         for fname in os.listdir(session_dir):
@@ -196,7 +196,7 @@ class McpListenerWidget(MayaQWidgetDockableMixin, QWidget):
             try:
                 with open(path) as f:
                     data = json.load(f)
-                if not _pid_alive(data.get("pid", 0)):
+                if data.get("pid") and not _pid_alive(data["pid"]):
                     os.remove(path)
                     continue
                 try:
@@ -211,7 +211,7 @@ class McpListenerWidget(MayaQWidgetDockableMixin, QWidget):
         return clients
 
     def dockCloseEventTriggered(self):
-        McpListenerWidget._instance = None
+        MayaBridgeWidget._instance = None
 
 
 def _delete_workspace():
@@ -234,24 +234,24 @@ def _delete_workspace():
 
 
 def show(listener_module, icon_path=""):
-    """Open or focus the dockable MCP Listener panel."""
-    if McpListenerWidget._instance is not None:
-        McpListenerWidget._instance.raise_()
+    """Open or focus the dockable Maya Bridge panel."""
+    if MayaBridgeWidget._instance is not None:
+        MayaBridgeWidget._instance.raise_()
         return
 
     _delete_workspace()
 
-    widget = McpListenerWidget(listener_module)
+    widget = MayaBridgeWidget(listener_module)
     widget.show(dockable=True, floating=False)
     ws_control = widget.objectName() + "WorkspaceControl"
     cmds.workspaceControl(
         ws_control,
         edit=True,
-        label="MCP Listener",
+        label="Maya Bridge",
         tabToControl=["AttributeEditor", -1],
         widthProperty="preferred",
         minimumWidth=280,
         restore=True,
     )
     widget.raise_()
-    McpListenerWidget._instance = widget
+    MayaBridgeWidget._instance = widget

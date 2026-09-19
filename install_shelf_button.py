@@ -1,8 +1,8 @@
 """
-Install the MCP Listener shelf button in Maya without opening the UI.
+Install the Maya Bridge shelf button in Maya without opening the UI.
 
 Usage in Maya Script Editor (Python):
-    exec(open("C:/Users/dkZuaAkb/Dev/Git/MayaMCP/install_shelf_button.py").read())
+    exec(open("C:/Users/dkZuaAkb/Dev/Git/maya-bridge/install_shelf_button.py").read())
 """
 import os
 import maya.cmds as cmds
@@ -10,10 +10,10 @@ import maya.mel
 
 
 def install():
-    _SCRIPT_DIR = "C:/Users/dkZuaAkb/Dev/Git/MayaMCP"
-    LISTENER_PATH = os.path.join(_SCRIPT_DIR, "maya_mcp_listener.py").replace("\\", "/")
-    ICON_PATH = os.path.join(_SCRIPT_DIR, "maya-mcp-icon.jpg")
-    BUTTON_NAME = "mcpListener"
+    _SCRIPT_DIR = "C:/Users/dkZuaAkb/Dev/Git/maya-bridge"
+    LISTENER_PATH = os.path.join(_SCRIPT_DIR, "maya_bridge_listener.py").replace("\\", "/")
+    ICON_PATH = os.path.join(_SCRIPT_DIR, "maya-bridge-icon.jpg")
+    BUTTON_NAME = "mayaBridge"
 
     target_shelf = "Custom"
     shelf_top = maya.mel.eval("$tmpVar=$gShelfTopLevel")
@@ -31,19 +31,19 @@ def install():
 
     click_cmd = (
         'import importlib.util, sys, maya.utils\n'
-        'def _mcp_open():\n'
-        '    if "maya_mcp_listener" in sys.modules: del sys.modules["maya_mcp_listener"]\n'
-        '    spec = importlib.util.spec_from_file_location("maya_mcp_listener", "{path}")\n'
+        'def _bridge_open():\n'
+        '    if "maya_bridge_listener" in sys.modules: del sys.modules["maya_bridge_listener"]\n'
+        '    spec = importlib.util.spec_from_file_location("maya_bridge_listener", "{path}")\n'
         '    mod = importlib.util.module_from_spec(spec)\n'
-        '    sys.modules["maya_mcp_listener"] = mod\n'
+        '    sys.modules["maya_bridge_listener"] = mod\n'
         '    spec.loader.exec_module(mod)\n'
-        'maya.utils.executeDeferred(_mcp_open)\n'
+        'maya.utils.executeDeferred(_bridge_open)\n'
     ).format(path=LISTENER_PATH)
 
     kwargs = {
         "parent": target_shelf,
         "label": BUTTON_NAME,
-        "annotation": "MCP Listener - connect AI harness to Maya",
+        "annotation": "Maya Bridge - connect AI harness to Maya",
         "command": click_cmd,
         "sourceType": "python",
     }
@@ -52,10 +52,10 @@ def install():
         kwargs["imageOverlayLabel"] = ""
     else:
         kwargs["image"] = "pythonFamily.png"
-        kwargs["imageOverlayLabel"] = "MCP"
+        kwargs["imageOverlayLabel"] = "MB"
 
     cmds.shelfButton(**kwargs)
-    print("[MCP] Shelf button installed on '{}'".format(target_shelf))
+    print("[Maya Bridge] Shelf button installed on '{}'".format(target_shelf))
 
 
 install()

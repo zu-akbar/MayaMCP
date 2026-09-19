@@ -1,1 +1,1 @@
-# No external dependencies — MCP protocol implemented directly.
+# No external dependencies — CLI bridge uses only the Python standard library.

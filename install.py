@@ -1,27 +1,25 @@
 """
-Maya MCP installer -- sets up the MCP server, skill, and userSetup.py.
-Run from the MayaMCP directory:
+Maya Bridge installer — sets up the skill and userSetup.py.
+Run from the maya-bridge directory:
     python install.py
 """
-import json
 import os
 import shutil
 import sys
 
-# Fix Windows console encoding
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SERVER_PATH = os.path.join(HERE, "maya_mcp_server.py").replace("\\", "/")
+BRIDGE_PATH = os.path.join(HERE, "maya_bridge.py").replace("\\", "/")
 SKILL_SRC = os.path.join(HERE, "skill", "SKILL.md")
 
 USERSETUP_SNIPPET = """
-# Maya MCP — open Python commandPort at startup
-# See https://github.com/zu-akbar/MayaMCP
+# Maya Bridge — open Python commandPort at startup
+# See https://github.com/zu-akbar/maya-bridge
 import maya.cmds as cmds
 
-def _mcp_open_port(port, source_type):
+def _mb_open_port(port, source_type):
     port_str = ':{}'.format(port)
     try:
         if not cmds.commandPort(port_str, query=True):
@@ -30,39 +28,22 @@ def _mcp_open_port(port, source_type):
     except RuntimeError:
         return False
 
-def _mcp_open_port_auto(source_type, port_base=7001, port_max=7020):
+def _mb_open_port_auto(source_type, port_base=7001, port_max=7020):
     for port in range(port_base, port_max + 1):
-        if _mcp_open_port(port, source_type):
+        if _mb_open_port(port, source_type):
             return port
     return None
 
-_mcp_open_port_auto('python')
+_mb_open_port_auto('python')
 """
-
-MCP_CONFIG_OPENCODE = {
-    "type": "local",
-    "command": ["python", SERVER_PATH],
-    "enabled": True
-}
-
-MCP_CONFIG_CLAUDECODE = {
-    "mcpServers": {
-        "maya": {
-            "command": "python",
-            "args": [SERVER_PATH]
-        }
-    }
-}
 
 
 def prompt(msg, options="y/n"):
-    """Ask a y/n question, return True for yes."""
     answer = input(f"{msg} [{options}]: ").strip().lower()
     return answer in ("y", "yes")
 
 
 def prompt_choice(msg, choices):
-    """Ask user to pick from a numbered list, return chosen value."""
     for i, c in enumerate(choices, 1):
         print(f"  {i}. {c}")
     while True:
@@ -72,67 +53,41 @@ def prompt_choice(msg, choices):
         print("  Invalid choice, try again.")
 
 
-def install_mcp_server():
-    print("\n-- MCP Server Registration --")
-    if not prompt("Register the MCP server with your AI harness?"):
-        return
-
-    scope = prompt_choice("Install globally or per-project?", ["global", "project"])
-
-    if scope == "global":
-        config_path = os.path.join(os.path.expanduser("~"), ".config", "opencode", "opencode.json")
-        os.makedirs(os.path.dirname(config_path), exist_ok=True)
-        config = {}
-        if os.path.exists(config_path):
-            with open(config_path) as f:
-                config = json.load(f)
-        config.setdefault("mcp", {})["maya"] = MCP_CONFIG_OPENCODE
-        with open(config_path, "w") as f:
-            json.dump(config, f, indent=2)
-        print(f"  Written: {config_path}")
-
-    else:
-        config_path = os.path.join(os.getcwd(), ".mcp.json")
-        config = {}
-        if os.path.exists(config_path):
-            with open(config_path) as f:
-                config = json.load(f)
-        config.setdefault("mcpServers", {})["maya"] = MCP_CONFIG_CLAUDECODE["mcpServers"]["maya"]
-        with open(config_path, "w") as f:
-            json.dump(config, f, indent=2)
-        print(f"  Written: {config_path}")
-
-    print("  Done.")
-
-
 def install_skill():
     print("\n-- Skill Installation --")
-    if not prompt("Install the maya-mcp skill for your AI harness?"):
+    if not prompt("Install the maya-bridge skill for your AI harness?"):
         return
 
     scope = prompt_choice("Install globally or per-project?", ["global", "project"])
 
     if scope == "global":
-        dest = os.path.join(os.path.expanduser("~"), ".claude", "skills", "maya-mcp")
+        dest = os.path.join(os.path.expanduser("~"), ".claude", "skills", "maya-bridge")
     else:
-        dest = os.path.join(os.getcwd(), ".opencode", "skills", "maya-mcp")
+        dest = os.path.join(os.getcwd(), ".opencode", "skills", "maya-bridge")
 
     os.makedirs(dest, exist_ok=True)
-    shutil.copy2(SKILL_SRC, os.path.join(dest, "SKILL.md"))
-    print(f"  Written: {os.path.join(dest, 'SKILL.md')}")
+
+    with open(SKILL_SRC) as f:
+        content = f.read()
+    content = content.replace("{{MAYA_BRIDGE_PATH}}", BRIDGE_PATH)
+
+    dest_file = os.path.join(dest, "SKILL.md")
+    with open(dest_file, "w") as f:
+        f.write(content)
+    print(f"  Written: {dest_file}")
+    print(f"  Bridge path: {BRIDGE_PATH}")
     print("  Done.")
 
 
 def patch_usersetup():
     print("\n-- userSetup.py --")
-    print("  Maya MCP requires a Python commandPort opened at Maya startup.")
+    print("  Maya Bridge requires a Python commandPort opened at Maya startup.")
     print("  This can be added to your userSetup.py automatically.")
 
     if not prompt("Patch userSetup.py?"):
         print("  Skipped. See README for the manual snippet.")
         return
 
-    # Find userSetup.py
     maya_version = input("  Maya version (e.g. 2023): ").strip() or "2023"
     if sys.platform == "win32":
         default = os.path.join(os.path.expanduser("~"), "Documents", "maya", maya_version, "scripts", "userSetup.py")
@@ -148,10 +103,9 @@ def patch_usersetup():
         print("  Skipped.")
         return
 
-    # Check if already patched
     if os.path.exists(path):
         with open(path) as f:
-            if "Maya MCP" in f.read():
+            if "Maya Bridge" in f.read():
                 print("  Already patched, skipping.")
                 return
 
@@ -163,9 +117,8 @@ def patch_usersetup():
 
 
 if __name__ == "__main__":
-    print("Maya MCP Installer")
+    print("Maya Bridge Installer")
     print("==================")
-    install_mcp_server()
     install_skill()
     patch_usersetup()
     print("\nAll done! See README.md for next steps.")

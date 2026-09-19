@@ -1,5 +1,5 @@
 ---
-name: maya-mcp
+name: maya-bridge
 description: >
   Use when the user wants to connect to a live Maya session, automate Maya
   tasks, manipulate scene content, or access Maya tools like VME Tools via
@@ -8,36 +8,59 @@ description: >
 license: MIT
 ---
 
-# Maya MCP
+# Maya Bridge
 
-You have access to MCP tools that connect to live Autodesk Maya sessions.
-Use them to explore scenes, manipulate geometry, and automate Maya tools.
+You have access to a CLI bridge that connects to live Autodesk Maya sessions.
+Use it to explore scenes, manipulate geometry, and automate Maya tools.
+
+All commands use the Bash tool:
+
+```
+python "{{MAYA_BRIDGE_PATH}}" <subcommand> [options]
+```
 
 ## Connection Workflow
 
 Always follow this sequence at the start:
 
 1. List available sessions:
-   ```
-   maya_list_sessions()
+   ```bash
+   python "{{MAYA_BRIDGE_PATH}}" list
    ```
 
 2. Ask the user which port(s) to connect to.
 
-3. Connect using **"Live Maya connection from chat"** as the session name — always:
-   ```
-   maya_connect(session_id="7001", session_name="Live Maya connection from chat")
+3. Connect:
+   ```bash
+   python "{{MAYA_BRIDGE_PATH}}" connect 7001 --name "Live Maya connection from chat"
    ```
 
 4. When done:
+   ```bash
+   python "{{MAYA_BRIDGE_PATH}}" disconnect 7001
    ```
-   maya_disconnect(session_id="7001")
-   ```
+
+## Executing Code
+
+Inline code:
+```bash
+python "{{MAYA_BRIDGE_PATH}}" eval --code "import maya.cmds; print(maya.cmds.ls(assemblies=True))"
+```
+
+Script file:
+```bash
+python "{{MAYA_BRIDGE_PATH}}" eval --file script.py
+```
+
+Explicit session (when multiple connected):
+```bash
+python "{{MAYA_BRIDGE_PATH}}" eval --code "..." --session 7001
+```
 
 ## Multi-Session Rules
 
-- When **one** session is connected: `session_id` is optional on eval calls.
-- When **multiple** sessions are connected: always specify `session_id`.
+- When **one** session exists: `--session` is optional on eval calls.
+- When **multiple** sessions are connected: always specify `--session PORT`.
 - Each Maya instance gets its own port: 7001, 7002, etc.
 
 ## Output Handling
@@ -48,10 +71,10 @@ Always follow this sequence at the start:
 
 ```python
 # Good
-maya_eval(code="import maya.cmds; print(maya.cmds.ls(assemblies=True))")
+import maya.cmds; print(maya.cmds.ls(assemblies=True))
 
 # Bad — no output returned
-maya_eval(code="import maya.cmds; maya.cmds.ls(assemblies=True)")
+import maya.cmds; maya.cmds.ls(assemblies=True)
 ```
 
 ## Scene Exploration

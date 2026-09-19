@@ -1,22 +1,22 @@
-# Maya MCP Server
+# Maya Bridge
 
-Lightweight MCP server that connects any AI code harness (Claude Code, OpenCode, Cursor, etc.) to live Autodesk Maya sessions.
+Lightweight CLI bridge that connects any AI code harness (Claude Code, OpenCode, Cursor, etc.) to live Autodesk Maya sessions.
 
 ## How It Works
 
 ```
-┌─────────────┐      stdio       ┌─────────────┐      TCP       ┌───────────┐
-│ Claude Code  │◄───(JSON-RPC)───►│  MCP Server  │◄──(Python)───►│   Maya    │
-│ OpenCode     │                  │              │               │  (7001)   │
-│ Cursor       │                  │ maya_mcp_    │               ├───────────┤
-│ ...          │                  │ server.py    │◄──(Python)───►│   Maya    │
+┌─────────────┐                  ┌─────────────┐      TCP       ┌───────────┐
+│ Claude Code  │   Bash tool      │  maya_bridge │◄──(Python)───►│   Maya    │
+│ OpenCode     │──(CLI call)────►│    .py       │               │  (7001)   │
+│ Cursor       │                  │              │◄──(Python)───►├───────────┤
+│ ...          │                  │  argparse    │               │   Maya    │
 └─────────────┘                  └─────────────┘               │  (7002)   │
                                                                 └───────────┘
 ```
 
-- **`maya_mcp_listener.py`** — runs inside Maya, registers the session with the MCP server
-- **`maya_mcp_server.py`** — MCP server (stdio), discovers Maya sessions and sends Python code to them
-- **`maya_mcp_ui.py`** — PySide2 dockable panel showing session info and connected AI clients
+- **`maya_bridge_listener.py`** — runs inside Maya, registers the session
+- **`maya_bridge.py`** — CLI tool, discovers Maya sessions and sends Python code to them
+- **`maya_bridge_ui.py`** — PySide2 dockable panel showing session info and connected AI clients
 
 Multiple Maya sessions supported simultaneously. Each instance gets a unique port (7001, 7002, ...).
 
@@ -33,24 +33,23 @@ Run the installer and follow the prompts:
 python install.py
 ```
 
-The installer handles three steps — each is independently skippable:
+The installer handles two steps — each is independently skippable:
 
-1. **MCP server registration** — global (`~/.config/opencode/opencode.json`) or per-project (`.mcp.json`)
-2. **Skill installation** — global (`~/.claude/skills/`) or per-project (`.opencode/skills/`)
-3. **`userSetup.py` patching** — shows exactly what will be added before writing
+1. **Skill installation** — global (`~/.claude/skills/`) or per-project (`.opencode/skills/`). Substitutes the bridge path into the skill template.
+2. **`userSetup.py` patching** — shows exactly what will be added before writing
 
 ### Manual setup
 
 #### 1. `userSetup.py`
 
-Maya MCP requires a Python commandPort opened **at Maya startup**. Maya 2023 has a bug where commandPorts opened after startup do not execute Python code.
+Maya Bridge requires a Python commandPort opened **at Maya startup**. Maya 2023 has a bug where commandPorts opened after startup do not execute Python code.
 
 Add the following to `~/Documents/maya/2023/scripts/userSetup.py`:
 
 ```python
 import maya.cmds as cmds
 
-def _mcp_open_port(port, source_type):
+def _mb_open_port(port, source_type):
     port_str = ':{}'.format(port)
     try:
         if not cmds.commandPort(port_str, query=True):
@@ -59,56 +58,29 @@ def _mcp_open_port(port, source_type):
     except RuntimeError:
         return False
 
-def _mcp_open_port_auto(source_type, port_base=7001, port_max=7020):
+def _mb_open_port_auto(source_type, port_base=7001, port_max=7020):
     for port in range(port_base, port_max + 1):
-        if _mcp_open_port(port, source_type):
+        if _mb_open_port(port, source_type):
             return port
     return None
 
-_mcp_open_port_auto('python')
+_mb_open_port_auto('python')
 ```
 
 Each Maya instance gets its own port (7001, 7002, ...), supporting up to 20 simultaneous sessions.
 
-#### 2. MCP server
+#### 2. Skill
 
-**OpenCode (global)** — add to `~/.config/opencode/opencode.json`:
-```json
-{
-  "mcp": {
-    "maya": {
-      "type": "local",
-      "command": ["python", "<path/to/MayaMCP>/maya_mcp_server.py"],
-      "enabled": true
-    }
-  }
-}
-```
+Copy `skill/SKILL.md` to your skill directory and replace `{{MAYA_BRIDGE_PATH}}` with the absolute path to `maya_bridge.py`:
 
-**Claude Code / other MCP clients** — add `.mcp.json` to your project root:
-```json
-{
-  "mcpServers": {
-    "maya": {
-      "command": "python",
-      "args": ["<path/to/MayaMCP>/maya_mcp_server.py"]
-    }
-  }
-}
-```
+- **Global:** `~/.claude/skills/maya-bridge/SKILL.md`
+- **Per-project:** `.opencode/skills/maya-bridge/SKILL.md`
 
-#### 3. Skill
-
-Copy `skill/SKILL.md` to your skill directory:
-
-- **Global:** `~/.claude/skills/maya-mcp/SKILL.md`
-- **Per-project:** `.opencode/skills/maya-mcp/SKILL.md`
-
-#### 4. Start the listener in Maya
+#### 3. Start the listener in Maya
 
 Run in Maya's Python Script Editor:
 ```python
-exec(open("<path/to/MayaMCP>/maya_mcp_listener.py").read())
+exec(open("<path/to/maya-bridge>/maya_bridge_listener.py").read())
 ```
 
 This will:
@@ -118,55 +90,61 @@ This will:
 
 **Or install just the shelf button** (one-time setup):
 ```python
-exec(open("<path/to/MayaMCP>/install_shelf_button.py").read())
+exec(open("<path/to/maya-bridge>/install_shelf_button.py").read())
 ```
 
-## MCP Tools
+## CLI Commands
 
-### Discovery & Connection
+```bash
+# List active Maya sessions
+python maya_bridge.py list
 
-| Tool | Description |
-|------|-------------|
-| `maya_list_sessions` | List all active Maya sessions — shows port, scene, version, and connection status |
-| `maya_connect` | Bind a Maya session to this chat session |
-| `maya_disconnect` | Unbind a Maya session from this chat session |
+# Connect to a session
+python maya_bridge.py connect 7001 --name "my session"
 
-### Execution
+# Disconnect
+python maya_bridge.py disconnect 7001
 
-| Tool | Description |
-|------|-------------|
-| `maya_eval` | Execute Python code in a connected Maya session |
-| `maya_eval_file` | Execute a .py script file in a connected Maya session |
+# Execute inline code
+python maya_bridge.py eval --code "import maya.cmds; print(maya.cmds.ls(assemblies=True))"
 
-When only one Maya session is connected, `session_id` is optional on eval calls.
+# Execute a script file
+python maya_bridge.py eval --file script.py
+
+# Target a specific session
+python maya_bridge.py eval --code "..." --session 7001
+```
+
+When only one Maya session exists, `--session` is optional.
 
 ### Example workflow
 
 ```
-1. maya_list_sessions()
+1. python maya_bridge.py list
    → [{"port": 7001, "scene": "hero_asset.mb", "connected": false},
       {"port": 7002, "scene": "rig_v2.mb",     "connected": false}]
 
-2. maya_connect(session_id="7001", session_name="Live Maya connection from chat")
+2. python maya_bridge.py connect 7001 --name "Live Maya connection from chat"
    → "Connected to Maya session 7001 (hero_asset.mb, Maya 2023)"
 
-3. maya_eval(code="import maya.cmds; maya.cmds.ls(assemblies=True)")
-   → "['persp', 'top', 'front', 'side', 'VME_11208696']"
-   (no session_id needed — only one connected)
+3. python maya_bridge.py eval --code "import maya.cmds; print(maya.cmds.ls(assemblies=True))"
+   → ['persp', 'top', 'front', 'side', 'VME_11208696']
 
-4. maya_connect(session_id="7002", session_name="Live Maya connection from chat")
-   → now two sessions connected — must specify session_id on eval
+4. python maya_bridge.py connect 7002 --name "Live Maya connection from chat"
+   → now two sessions connected — must specify --session on eval
 
-5. maya_eval(session_id="7001", code="maya.cmds.file(q=True, sceneName=True)")
-   → "C:/scenes/hero_asset.mb"
+5. python maya_bridge.py eval --session 7001 --code "import maya.cmds; print(maya.cmds.file(q=True, sceneName=True))"
+   → C:/scenes/hero_asset.mb
 ```
 
 ## Architecture
 
 - **`sourceType="python"`** on Maya's commandPort — code sent as raw Python, no MEL wrapping
 - **Fire-and-forget** — socket closed immediately after sending to avoid Maya 2023's CommandPort.py bytes/str bug; results written to temp files
-- **Session registry** via temp files (`%TEMP%/maya_mcp_sessions/<port>.json`)
-- **Client tracking** via heartbeat files (`%TEMP%/maya_mcp_clients/<port>_<client_id>.json`)
+- **Session registry** via temp files (`%TEMP%/maya_bridge_sessions/<port>.json`)
+- **Client tracking** via heartbeat files (`%TEMP%/maya_bridge_clients/<port>_<client_id>.json`)
+- **Persistent client ID** — stored in `%TEMP%/maya_bridge_clients/.client_id`, survives process restarts
+- **Connection state** — file-based (`connections_<id>.json`), survives process exit
 - **Watchdog timer** monitors port health and updates session metadata every 5 seconds
-- **Stale cleanup** — dead sessions/clients detected by PID check and removed automatically
+- **Stale cleanup** — dead sessions detected by PID check and removed automatically
 - **Port collision detection** — listener skips already-registered ports so multiple Maya instances each get a unique port
